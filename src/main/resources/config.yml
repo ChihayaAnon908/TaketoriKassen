@@ -1,0 +1,116 @@
+# 竹取合战 · 战斗层配置
+# 修改后执行 /taketori reload 生效（无需重启服务器）
+config-version: 3
+
+# 语言文件（messages.yml）中的语言键
+language: zh_CN
+
+# 调试输出：开启后控制台会打印每次输入的去向，便于排查"按了没反应"：
+#   [input]  收到的原始交互事件（包括"不是插件武器"这种被忽略的情况）
+#   [skill]  技能派发结果（成功 / 冷却中 / 未绑定 / 类型未注册）
+#   [combat] 近战改写、弹体取消、摔落免疫、弓射击
+# 也可以在游戏里用 /taketori debug on 临时打开（本次运行有效）。
+# 排查用 /taketori doctor 可以一次性报告识别、绑定、名字解析等状态。
+debug: false
+
+storage:
+  # 本期为 yaml，仅保存玩家角色绑定；第二期加入对局数据后可换 sqlite
+  type: yaml
+
+# 表现层开关（本期只用原版粒子与音效，不使用资源包）
+feedback:
+  actionbar: true
+  particles: true
+  sounds: true
+  # 技能冷却条（骑马时马血条那种位置与样式的进度条）：
+  #   bossbar   = 屏幕上方进度条，每个技能一条，颜色按按键区分（默认）
+  #   actionbar = 只在底部文字里显示冷却秒数加进度字符
+  #   both      = 两者都显示
+  #   none      = 关闭
+  cooldown-display: bossbar
+
+items:
+  # 武器物品是否绑定所有者（防止交易 / 掉落转手）
+  soulbound: true
+  # 玩家进服时是否自动补发其角色武器
+  auto-give-on-join: false
+  # 是否允许武器被丢出（Q 键拦截在此之上）
+  allow-drop: false
+
+input:
+  # Q 键处理方式：
+  #   drop      = Q 触发该武器 q 槽声明的技能（模式切换 / 装备切换）。默认值。
+  #   held-slot = Q 直接切换到下一件本角色的武器（不触发技能）
+  #   none      = 只拦截丢弃，不做任何切换
+  q-mode: drop
+  # 快捷栏中为角色武器预留的槽位（0-8）
+  weapon-slots: [ 0, 1, 2, 3 ]
+
+# ============================ 对局规则（玩法层）============================
+# 3v3 积分赛：先到 600 分获胜，20 分钟超时按分高者胜。
+# 场地用指令划定（/taketori arena ...），保存在 arena.yml。
+match:
+  # 先达到多少分获胜
+  score-to-win: 600
+  # 时限（分钟）；到点按分高者胜，平分判平局
+  time-limit-minutes: 20
+  # 每队人数上限（随机分队的满员判定）
+  team-size: 3
+  # 死亡后多少秒自动复活（重生点固定为己方出生点；玩家自己点重生也可以）
+  respawn-delay-seconds: 5
+  # 死亡是否保留物品（竞技默认保留）
+  keep-inventory: true
+  # 对局模式：pvp = 红蓝对抗；pve = 所有人同一队打月人（不占点、默认无友伤保护）
+  # 也可以用指令切换：/taketori match mode pvp|pve
+  mode: pvp
+
+# ============================ 大厅 ============================
+# 大厅出生点、区域与告示牌都用指令设置（/taketori lobby ...），保存在 lobby.yml。
+lobby:
+  # 队列人数达到多少自动开局（0 = 只能手动 /taketori match start）
+  auto-start-players: 6
+  # 玩家进服是否自动传送到大厅
+  teleport-on-join: true
+  # 大厅区域内是否禁止掉血
+  protect: true
+  # 对局结束后是否把参赛者送回大厅
+  return-after-match: true
+
+scoring:
+  minion-kill: 3      # 击杀小怪得分
+  player-kill: 10     # 击杀对方玩家得分（队友互杀不计分）
+  base-capture: 50    # 拆除对方基地得分
+
+# 击杀回血：单位是「生命点」，2 点 = 1 颗心（默认 6 点 = 3 颗心）。0 = 关闭。
+# 击杀敌方玩家时立刻回血，满血不回、也不刷提示；回复量不会超过当前最大生命值
+# （角色有自定义血量上限时按那个上限封顶）。
+combat:
+  kill-heal: 6.0         # 击杀敌方玩家回血
+  minion-kill-heal: 0.0  # 击杀小兵回血（默认关闭；想让抢怪也回血就调大）
+  # 友伤保护：同一队的玩家互相不造成伤害
+  #   auto = PVP 模式开启、PVE 模式关闭（默认）
+  #   on   = 两种模式都保护      off = 两种模式都不保护
+  friendly-fire-protection: auto
+
+minion:
+  health: 40           # 小怪血量
+  iron-armor: true     # 是否穿全套铁甲
+  interval-seconds: 9  # 刷新间隔（秒）
+  per-spawn: 3         # 每次刷新数量
+  max-alive: 15        # 场上同时存在的上限（达到上限就停止刷新）
+
+base:
+  capture-seconds: 10        # 拆除一个基地需要连续占点多少秒（核心耐久）
+  capture-delay-seconds: 60  # 开局保护期：前 60 秒禁止占点
+  decay-per-second: 0.5      # 区域内没有敌人时，进度每秒衰减多少（0 = 不衰减）
+  multi-player-bonus: true   # 多人同时占点是否加速
+
+# 管理用具：选区锄（划场地的快捷方式，等价于 /taketori arena pos1 | pos2）
+#   左键点方块 = 角点 1，右键点方块 = 角点 2
+#   潜行 + 左键 = 清空选区，潜行 + 右键 = 查看选区信息
+#   选好之后用 /taketori arena setminion | setbase <red|blue> [编号] | setspawn 绑定
+setup-wand:
+  enabled: true             # 关掉就完全禁用这把锄头（原版行为恢复）
+  material: NETHERITE_HOE   # 绑定在什么物品上（填原版 Material 名）
+  outline-particles: true   # 手持时用粒子描出选区边框，看不见就关掉
+  give-on-join: false       # 有 taketori.admin 权限的玩家进服自动发一把

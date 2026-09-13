@@ -1,0 +1,61 @@
+# 竹取合战 · 角色定义（战斗层）
+#
+# 角色决定"玩家能拿到哪些武器"以及基础属性。
+# weapons 的顺序同时也是 Q 键切换武器时的循环顺序（config.yml 的 input.weapon-slots 决定放哪几个槽位）。
+
+characters:
+
+  kaguya:
+    display: '<gradient:#f5c26b:#f78fb3>辉夜</gradient>'
+    weapons: [ kaguya_hammer ]
+    attributes:
+      max-health: 20.0
+      movement-speed: 0.1
+    lore:
+      - '<gray>月之公主，以火箭锤开路。'
+
+  mikado:
+    display: '<dark_purple>帝</dark_purple>'
+    weapons: [ mikado_konbo ]
+    attributes:
+      max-health: 24.0
+      movement-speed: 0.1
+    lore:
+      - '<gray>金棒一挥，近远皆可。'
+
+  iroha:
+    display: '<white>彩叶</white>'
+    weapons: [ iroha_sword, iroha_wire ]
+    attributes:
+      max-health: 20.0
+      movement-speed: 0.11
+    lore:
+      - '<gray>剑与钢丝并用，机动力最高。'
+
+  noi:
+    display: '<green>乃依</green>'
+    weapons: [ noi_bow ]
+    attributes:
+      max-health: 18.0
+      movement-speed: 0.1
+    lore:
+      - '<gray>远程压制，保留原版弓机制。'
+
+  rai:
+    display: '<aqua>雷</aqua>'
+    weapons: [ rai_shield, rai_banner ]
+    attributes:
+      max-health: 26.0
+      movement-speed: 0.095
+    lore:
+      - '<gray>以盾为城，守中有反。'
+
+  # 月镜 / 冰冻旗鱼这类"特殊装备"不属于任何角色，由管理员单独发放
+  special:
+    display: '<light_purple>特殊装备</light_purple>'
+    weapons: [ moon_mirror, frozen_swordfish ]
+    attributes:
+      max-health: 20.0
+      movement-speed: 0.1
+    lore:
+      - '<gray>不属于角色的通用装备。'

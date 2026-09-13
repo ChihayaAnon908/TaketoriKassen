@@ -1,0 +1,21 @@
+name: TaketoriKassen
+version: '${version}'
+main: com.taketori.kassen.TaketoriPlugin
+api-version: '1.21'
+description: '竹取合战复刻：角色 / 武器 / 技能 + 3v3 积分赛玩法（大厅、随机分队、旁观）'
+authors: [ Taketori ]
+website: 'https://github.com/'
+
+commands:
+  taketori:
+    description: 竹取合战主命令
+    usage: '/taketori <character|skills|mode|play|match|team|arena|lobby|stats|leave|editor|give|debug|doctor|qmode|reload>'
+    permission: taketori.play
+
+permissions:
+  taketori.play:
+    description: 允许使用玩家指令（play / skills / mode / lobby join / leave 退出观战等）
+    default: true
+  taketori.admin:
+    description: 允许使用管理指令（give / character / arena（含 wand 选区锄）/ lobby 配置 / match force 强制开局 / editor 武器编辑 GUI / reload / debug）
+    default: op
