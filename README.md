@@ -23,8 +23,6 @@
 
 ## 1. 构建
 
-### 方式 A：Gradle（有网络时推荐）
-
 ```bash
 cd taketori-kassen
 gradle build          # 产物在 build/libs/
@@ -32,54 +30,6 @@ gradle build          # 产物在 build/libs/
 
 `build.gradle.kts` 已内置兼容护栏任务 `checkCorePurity`：`core/` 层一旦出现
 `org.bukkit` / `io.papermc` / `net.minecraft` / `craftbukkit` 引用，**构建直接失败**。
-
-### 方式 B：离线脚本（无网络、无 Gradle 时）
-
-```powershell
-pwsh -File build-offline.ps1
-pwsh -File build-offline.ps1 -LibsDirs "<依赖目录1>","<依赖目录2>"   # 依赖不在默认位置时
-pwsh -File build-offline.ps1 -JavaHome "<JDK 21 安装目录>"            # 没配 JAVA_HOME 时
-```
-
-依赖 jar 的查找顺序：仓库下的 `libs/adv19` → 仓库下的 `libs/`（同名 artifact 取先找到的那个）；
-也可以用环境变量 `TAKETORI_LIBS`（多个目录用分号分隔）或 `-LibsDirs` 指定别的位置。
-**换机器时**把 paper-api 与 adventure 的 jar 丢进仓库下的 `libs/` 目录即可。
-脚本会执行与 Gradle 等价的 core 纯度检查与技能参数键检查，然后 `javac` 编译并打包：
-
-```
-build/dist/TaketoriKassen-0.7.6.jar
-```
-
-> 离线脚本只要求 **JDK 21** 与任意一份 **paper-api jar**（1.21.x）。
-> 开发环境用 **paper-api 1.21.4** 编译、按 Paper 1.21.1 运行：所有版本敏感的名字
-> （属性 / 粒子 / 音效 / 药水效果）都经 `VersionAdapter` 的注册表解析，
-> 因此同一份源码在 1.21.1 与 1.21.4 上都能编译与运行。
-
-### 离线回归测试（不需要服务端）
-
-```powershell
-javac -encoding UTF-8 --release 21 -d build/test-classes `
-  src/main/java/com/taketori/kassen/core/match/TeamId.java `
-  src/main/java/com/taketori/kassen/core/match/BaseArgParser.java `
-  src/main/java/com/taketori/kassen/paper/editor/WeaponYamlEditor.java `
-  tools/*.java
-java -cp build/test-classes BaseArgParserTest        # 指令参数解析
-java -cp build/test-classes WeaponYamlEditorTest     # weapons.yml 保留注释的写回
-java -cp "<adventure jars>;build/test-classes" MiniMessageClickTest   # 聊天栏按钮
-```
-
-### 版本号
-
-版本号**只有一处来源** —— `gradle.properties` 的 `version=`：
-
-```properties
-version=0.7.6
-```
-
-`plugin.yml` 里的 `${version}` 占位符（Gradle 用 `processResources` 展开，离线脚本在打包时替换）、
-产物 jar 的文件名、以及启动日志里的版本号都由它派生。**发版只改这一行**，
-产物会输出为 `build/dist/TaketoriKassen-<version>.jar`。
-每版的改动记录在 `CHANGELOG.md`。
 
 ---
 
