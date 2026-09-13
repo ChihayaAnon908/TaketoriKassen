@@ -4,6 +4,9 @@ out/
 *.class
 *.log
 
+# ---- 本地依赖 jar（离线构建用，不入库） ----
+libs/
+
 # ---- Gradle ----
 .gradle/
 gradle-app.setting

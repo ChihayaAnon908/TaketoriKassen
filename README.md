@@ -42,9 +42,10 @@ pwsh -File build-offline.ps1 -LibsDirs "D:\my\libs","D:\my\paper-libs"
 pwsh -File build-offline.ps1 -JavaHome "C:\Program Files\Java\jdk-21"
 ```
 
-脚本用本机已有的 jar 做 classpath（默认 `D:\workspace\libs\adv19` → `libs` → `_mm_libs`，
-同名 artifact 取新版本；用 `-LibsDirs` 指向你自己的目录即可），
-执行与 Gradle 等价的 core 纯度检查与技能参数键检查，然后 `javac` 编译并打包：
+依赖 jar 的查找顺序：仓库下的 `libs/adv19` → `libs/` →（作者机器上的）`D:\workspace\libs\adv19` → …
+同名 artifact 取先找到的那个。**换机器时**把 paper-api 与 adventure 的 jar 丢进仓库下的 `libs/` 目录即可，
+或者用 `-LibsDirs` 指定别的位置。脚本会执行与 Gradle 等价的 core 纯度检查与技能参数键检查，
+然后 `javac` 编译并打包：
 
 ```
 build/dist/TaketoriKassen-0.7.6.jar

@@ -2,30 +2,44 @@
 #
 # Usage:
 #   pwsh -File build-offline.ps1
-#   pwsh -File build-offline.ps1 -LibsDirs "D:\path\to\libs"
+#   pwsh -File build-offline.ps1 -LibsDirs "D:\path\to\libs","D:\path\to\paper-libs"
+#   pwsh -File build-offline.ps1 -JavaHome "C:\Program Files\Java\jdk-21"
 #
-# Classpath sources (first match per artifact wins, so newer versions take priority):
-#   D:\workspace\libs\adv19   -> adventure 4.19 (api / key / minimessage / legacy serializer)
-#   D:\workspace\libs         -> adventure 4.12, purpur-api 1.21.4
-#   D:\workspace\_mm_libs     -> paper-api 1.21.4, guava, gson, snakeyaml, annotations, ...
+# Where the dependency jars come from (first match per artifact wins, so newer versions
+# take priority). When -LibsDirs is omitted these are probed in order:
+#   <repo>\libs\adv19   -> adventure api / key / minimessage / legacy serializer
+#   <repo>\libs         -> adventure, purpur-api, ...
+#   D:\workspace\libs\adv19, D:\workspace\libs, D:\workspace\_mm_libs   (author's machine)
 #
+# Only two things are really required: JDK 21 and any paper-api jar for 1.21.x.
 # Note: the API jar used here is 1.21.4 (the only modern API jar available locally).
 # The plugin targets Paper 1.21.1; every version-sensitive name (attributes, particles,
 # sounds, potion effects) goes through VersionAdapter's registry lookup, so the same
 # sources compile and run on both 1.21.1 and 1.21.4.
 
 param(
-    [string[]]$LibsDirs = @(
-        "D:\workspace\libs\adv19",
-        "D:\workspace\libs",
-        "D:\workspace\_mm_libs"
-    ),
+    [string[]]$LibsDirs = @(),
     [string]$JavaHome = $env:JAVA_HOME,
     [switch]$SkipPurityCheck
 )
 
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
+
+if ($LibsDirs.Count -eq 0) {
+    $LibsDirs = @(
+        (Join-Path $root "libs\adv19"),
+        (Join-Path $root "libs"),
+        "D:\workspace\libs\adv19",
+        "D:\workspace\libs",
+        "D:\workspace\_mm_libs"
+    ) | Where-Object { Test-Path $_ }
+    if ($LibsDirs.Count -eq 0) {
+        throw "No dependency jars found. Put paper-api (1.21.x) and adventure jars into '$root\libs', or pass -LibsDirs <dir>."
+    }
+    Write-Host "[i] classpath dirs: $($LibsDirs -join ', ')"
+}
+
 $srcDir = Join-Path $root "src\main\java"
 $resDir = Join-Path $root "src\main\resources"
 $classesDir = Join-Path $root "build\classes"
