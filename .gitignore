@@ -29,3 +29,16 @@ Desktop.ini
 # ---- 本地临时 ----
 *.bak
 *.tmp
+
+# ---- 敏感文件（绝不入库） ----
+.env
+.env.*
+*.token
+*.pem
+*.key
+*.p12
+*.jks
+*.pfx
+.gh-token
+gh-token
+credentials*
