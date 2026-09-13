@@ -2,14 +2,14 @@
 #
 # Usage:
 #   pwsh -File build-offline.ps1
-#   pwsh -File build-offline.ps1 -LibsDirs "D:\path\to\libs","D:\path\to\paper-libs"
-#   pwsh -File build-offline.ps1 -JavaHome "C:\Program Files\Java\jdk-21"
+#   pwsh -File build-offline.ps1 -LibsDirs "<dir>","<dir2>"
+#   pwsh -File build-offline.ps1 -JavaHome "<path to JDK 21>"
 #
 # Where the dependency jars come from (first match per artifact wins, so newer versions
 # take priority). When -LibsDirs is omitted these are probed in order:
 #   <repo>\libs\adv19   -> adventure api / key / minimessage / legacy serializer
-#   <repo>\libs         -> adventure, purpur-api, ...
-#   D:\workspace\libs\adv19, D:\workspace\libs, D:\workspace\_mm_libs   (author's machine)
+#   <repo>\libs         -> paper-api, adventure, guava, gson, snakeyaml, ...
+#   $env:TAKETORI_LIBS  -> extra dirs separated by ';' (handy for a local jar cache)
 #
 # Only two things are really required: JDK 21 and any paper-api jar for 1.21.x.
 # Note: the API jar used here is 1.21.4 (the only modern API jar available locally).
@@ -27,15 +27,14 @@ $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 
 if ($LibsDirs.Count -eq 0) {
+    $envLibs = @()
+    if ($env:TAKETORI_LIBS) { $envLibs = $env:TAKETORI_LIBS -split ';' }
     $LibsDirs = @(
         (Join-Path $root "libs\adv19"),
-        (Join-Path $root "libs"),
-        "D:\workspace\libs\adv19",
-        "D:\workspace\libs",
-        "D:\workspace\_mm_libs"
-    ) | Where-Object { Test-Path $_ }
+        (Join-Path $root "libs")
+    ) + $envLibs | Where-Object { $_ -and (Test-Path $_) }
     if ($LibsDirs.Count -eq 0) {
-        throw "No dependency jars found. Put paper-api (1.21.x) and adventure jars into '$root\libs', or pass -LibsDirs <dir>."
+        throw "No dependency jars found. Put paper-api (1.21.x) and adventure jars into '$root\libs', or pass -LibsDirs <dir>, or set TAKETORI_LIBS."
     }
     Write-Host "[i] classpath dirs: $($LibsDirs -join ', ')"
 }

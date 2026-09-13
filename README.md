@@ -1,9 +1,9 @@
 # TaketoriKassen · 竹取合战复刻（Paper 1.21.1）
 
-《竹取合战》的 Minecraft 服务端复刻插件：**战斗层**（角色 / 武器 / 技能 / 输入 / 冷却 / 表现）
-+ **玩法层**（3v3 积分赛与 PVE 合作、大厅与随机分队、观众模式、基地占点、月人刷新）。
+> 超时空辉夜姬 / 竹取合战的 Minecraft 服务端复刻插件：**战斗层**（角色 / 武器 / 技能 / 输入 / 冷却 / 表现）
+> \+ **玩法层**（3v3 积分赛与 PVE 合作、大厅与随机分队、观众模式、基地占点、月人刷新）。
 
-- 全部数值外置 YAML，改配置不用重新编译；游戏内也能改（`/taketori editor`）；
+- 8 把武器 / 6 个角色 / 15 种技能类型，数值全部外置 YAML，游戏内也能改（`/taketori editor`）；
 - 物品身份只认 PDC（PersistentDataContainer），改名改 Lore 不影响识别；
 - 只用原版粒子与音效，**不需要资源包、不需要客户端 mod**。
 
@@ -37,24 +37,22 @@ gradle build          # 产物在 build/libs/
 
 ```powershell
 pwsh -File build-offline.ps1
-# 依赖 jar 不在默认位置时：
-pwsh -File build-offline.ps1 -LibsDirs "D:\my\libs","D:\my\paper-libs"
-pwsh -File build-offline.ps1 -JavaHome "C:\Program Files\Java\jdk-21"
+pwsh -File build-offline.ps1 -LibsDirs "<依赖目录1>","<依赖目录2>"   # 依赖不在默认位置时
+pwsh -File build-offline.ps1 -JavaHome "<JDK 21 安装目录>"            # 没配 JAVA_HOME 时
 ```
 
-依赖 jar 的查找顺序：仓库下的 `libs/adv19` → `libs/` →（作者机器上的）`D:\workspace\libs\adv19` → …
-同名 artifact 取先找到的那个。**换机器时**把 paper-api 与 adventure 的 jar 丢进仓库下的 `libs/` 目录即可，
-或者用 `-LibsDirs` 指定别的位置。脚本会执行与 Gradle 等价的 core 纯度检查与技能参数键检查，
-然后 `javac` 编译并打包：
+依赖 jar 的查找顺序：仓库下的 `libs/adv19` → 仓库下的 `libs/`（同名 artifact 取先找到的那个）；
+也可以用环境变量 `TAKETORI_LIBS`（多个目录用分号分隔）或 `-LibsDirs` 指定别的位置。
+**换机器时**把 paper-api 与 adventure 的 jar 丢进仓库下的 `libs/` 目录即可。
+脚本会执行与 Gradle 等价的 core 纯度检查与技能参数键检查，然后 `javac` 编译并打包：
 
 ```
 build/dist/TaketoriKassen-0.7.6.jar
 ```
 
-> 这些默认路径是作者机器上的位置，换机器请用 `-LibsDirs` 指定；离线脚本只要求
-> **JDK 21** 与任意一份 **paper-api jar**（1.21.x）。
-> API jar 用的是本机唯一可用的现代版本 **paper-api 1.21.4**。插件按 Paper 1.21.1 编写，
-> 所有版本敏感的名字（属性 / 粒子 / 音效 / 药水效果）都经 `VersionAdapter` 的注册表解析，
+> 离线脚本只要求 **JDK 21** 与任意一份 **paper-api jar**（1.21.x）。
+> 开发环境用 **paper-api 1.21.4** 编译、按 Paper 1.21.1 运行：所有版本敏感的名字
+> （属性 / 粒子 / 音效 / 药水效果）都经 `VersionAdapter` 的注册表解析，
 > 因此同一份源码在 1.21.1 与 1.21.4 上都能编译与运行。
 
 ### 离线回归测试（不需要服务端）
