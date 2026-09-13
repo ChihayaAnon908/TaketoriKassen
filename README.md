@@ -1,9 +1,23 @@
-# TaketoriKassen · 竹取合战战斗层（Paper 1.21.1）
+# TaketoriKassen · 竹取合战复刻（Paper 1.21.1）
 
-《竹取合战》MC 服务端复刻的**战斗层**：角色 / 武器 / 技能 / 输入 / 冷却 / 表现。
-玩法层（回合、胜负、三路推塔、据点、残机）**不在本期范围**，属于第二期。
+《竹取合战》的 Minecraft 服务端复刻插件：**战斗层**（角色 / 武器 / 技能 / 输入 / 冷却 / 表现）
++ **玩法层**（3v3 积分赛与 PVE 合作、大厅与随机分队、观众模式、基地占点、月人刷新）。
 
-设计依据：`CPK/竹取合战_Paper武器技能映射表.xlsx` 与 `CPK/竹取合战_MC复刻开发计划.md`。
+- 全部数值外置 YAML，改配置不用重新编译；游戏内也能改（`/taketori editor`）；
+- 物品身份只认 PDC（PersistentDataContainer），改名改 Lore 不影响识别；
+- 只用原版粒子与音效，**不需要资源包、不需要客户端 mod**。
+
+### 文档导航
+
+| 文档 | 内容 |
+| --- | --- |
+| `操作手册.md` | 从零到开一局：安装、场地与大厅划定、指令总表、配置速查、常见问题 |
+| `玩法说明.md` | 3v3 与 PVE 规则、大厅流程、旁观模式、可调参数 |
+| `技能清单.md` | 每把武器每个按键做了什么、数值与冷却 |
+| `技能树.md` | 角色 / 武器 / 技能的整体结构 |
+| `效果修改指南.md` | 想改某个效果时该动哪个键 |
+| `效果对照表.md` | 配置值 ↔ 对铁甲玩家的实际伤害 |
+| `CHANGELOG.md` | 每个版本的改动记录 |
 
 ---
 
@@ -23,25 +37,44 @@ gradle build          # 产物在 build/libs/
 
 ```powershell
 pwsh -File build-offline.ps1
+# 依赖 jar 不在默认位置时：
+pwsh -File build-offline.ps1 -LibsDirs "D:\my\libs","D:\my\paper-libs"
+pwsh -File build-offline.ps1 -JavaHome "C:\Program Files\Java\jdk-21"
 ```
 
-脚本用本机已有的 jar 做 classpath（`libs\adv19` → `libs` → `_mm_libs`，同名 artifact 取新版本），
-执行与 Gradle 等价的 core 纯度检查，然后 `javac` 编译并打包：
+脚本用本机已有的 jar 做 classpath（默认 `D:\workspace\libs\adv19` → `libs` → `_mm_libs`，
+同名 artifact 取新版本；用 `-LibsDirs` 指向你自己的目录即可），
+执行与 Gradle 等价的 core 纯度检查与技能参数键检查，然后 `javac` 编译并打包：
 
 ```
-build/dist/TaketoriKassen-0.1.0.jar
+build/dist/TaketoriKassen-0.7.6.jar
 ```
 
+> 这些默认路径是作者机器上的位置，换机器请用 `-LibsDirs` 指定；离线脚本只要求
+> **JDK 21** 与任意一份 **paper-api jar**（1.21.x）。
 > API jar 用的是本机唯一可用的现代版本 **paper-api 1.21.4**。插件按 Paper 1.21.1 编写，
 > 所有版本敏感的名字（属性 / 粒子 / 音效 / 药水效果）都经 `VersionAdapter` 的注册表解析，
 > 因此同一份源码在 1.21.1 与 1.21.4 上都能编译与运行。
+
+### 离线回归测试（不需要服务端）
+
+```powershell
+javac -encoding UTF-8 --release 21 -d build/test-classes `
+  src/main/java/com/taketori/kassen/core/match/TeamId.java `
+  src/main/java/com/taketori/kassen/core/match/BaseArgParser.java `
+  src/main/java/com/taketori/kassen/paper/editor/WeaponYamlEditor.java `
+  tools/*.java
+java -cp build/test-classes BaseArgParserTest        # 指令参数解析
+java -cp build/test-classes WeaponYamlEditorTest     # weapons.yml 保留注释的写回
+java -cp "<adventure jars>;build/test-classes" MiniMessageClickTest   # 聊天栏按钮
+```
 
 ### 版本号
 
 版本号**只有一处来源** —— `gradle.properties` 的 `version=`：
 
 ```properties
-version=0.2.0
+version=0.7.6
 ```
 
 `plugin.yml` 里的 `${version}` 占位符（Gradle 用 `processResources` 展开，离线脚本在打包时替换）、
@@ -124,22 +157,29 @@ version=0.2.0
 
 ### config.yml（节选）
 
-| 键 | 说明 |
-| --- | --- |
-| `debug` | 开启后 `/taketori debug` 可用，并输出每次输入的去向 |
-| `feedback.actionbar / particles / sounds` | 表现层开关（本期只用原版粒子与音效） |
-| `items.soulbound` | 武器是否绑定所有者（防交易转手、防被他人捡走） |
-| `items.auto-give-on-join` | 进服自动补发角色武器 |
-| `input.q-mode` | `drop`（默认，Q 触发 q 槽技能）/ `held-slot`（Q 切到下一件本角色武器）/ `none` |
-| `input.weapon-slots` | 角色武器发放到哪些快捷栏槽位 |
+| 段 | 关键项 | 说明 |
+| --- | --- | --- |
+| `match` | `mode` / `score-to-win` / `time-limit-minutes` / `team-size` / `respawn-delay-seconds` / `keep-inventory` | `mode: pvp`（红蓝对抗）或 `pve`（合作打月人）；默认 600 分 / 20 分钟 / 每队 3 人 / 5 秒复活 |
+| `scoring` | `minion-kill` / `player-kill` / `base-capture` | 3 / 10 / 50 |
+| `combat` | `kill-heal` / `minion-kill-heal` / `friendly-fire-protection` | 击杀回血（2 点 = 1 颗心）；友伤保护 `auto` = PVP 开 / PVE 关 |
+| `minion` | `health` / `iron-armor` / `interval-seconds` / `per-spawn` / `max-alive` | 月人（40 血铁甲僵尸）的刷新节奏与上限 |
+| `base` | `capture-seconds` / `capture-delay-seconds` / `decay-per-second` / `multi-player-bonus` | 占点读条、开局保护期、无人占点时的衰减 |
+| `lobby` | `auto-start-players` / `teleport-on-join` / `protect` / `return-after-match` | 大厅与自动开局 |
+| `setup-wand` | `enabled` / `material` / `outline-particles` / `give-on-join` | 选区锄（默认绑定下界合金锄） |
+| `feedback` | `actionbar` / `particles` / `sounds` / `cooldown-display` | 表现层开关与冷却条形式（`bossbar` / `actionbar` / `both` / `none`） |
+| `items` | `soulbound` / `auto-give-on-join` / `allow-drop` | 武器绑定与进服自动补发 |
+| `input` | `q-mode` / `weapon-slots` | `drop`（默认，Q 触发 q 槽技能）/ `held-slot` / `none` |
+| `debug` | 调试日志总开关 | 也可以用 `/taketori debug on` 运行时打开 |
 
 ### weapons.yml
 
-数值**全部在这里**，改配置不需要重新编译。语义：
+数值**全部在这里**，改配置不需要重新编译；游戏里也能改（`/taketori editor`，会写回本文件并保留注释）。
 
-- `attributes.attack-damage` / `attack-speed` 是**额外加成**（ADD_NUMBER），不是最终值。
+- `attributes.attack-damage` / `attack-speed` 写的是**最终值**：实现会读该材质在原版的基础属性、算出差值再追加，
+  所以你写 `11.0`，玩家面板上就是 `11.0`，不需要自己心算原版基础值。
 - `modes.<MODE>.skills` 会**整段替换**武器级同名槽位，用来表达 Q 切换模式后的差异。
-- 技能 `params` 的名字就是实现类读取的键。
+- `hit-effects` 是"命中附加"段（例如乃依的箭随机挂负面效果：`arrow-debuffs`）。
+- 技能 `params` 的名字就是实现类读取的键；写错的键会被启动时的配置校验点名。
 
 ### 技能类型与参数
 
@@ -181,19 +221,32 @@ config/    ConfigManager / Messages
 
 ## 6. 已实现 / 未实现
 
-已实现（M0–M5）
+战斗层
 
 - 插件骨架、命令组、配置热重载、配置校验（角色引用不存在的武器会在加载期报错）
 - PDC 身份闭环：8 把武器生成、回读、绑定归属、防伪（改名改 Lore 不影响识别）
 - 统一输入层 + 载体护栏 + 左键去重 + Q/F 键处理
-- 技能框架 + 11 种技能类型 + 8 把武器全部按键映射
-- 冷却系统、模式切换（真源在玩家档案，PDC 只作展示冗余）、防御窗口与反弹
-- 数值 100% 外置 YAML；架构护栏（core 纯度检查）
+- 技能框架 + 15 种技能类型 + 8 把武器全部按键映射
+- 冷却系统（BossBar 冷却条）、模式切换、防御窗口与反弹、易伤标记、连击叠伤
+- 击杀回血；乃依箭矢随机负面效果；数值 100% 外置 YAML；架构护栏（core 纯度检查）
 
-未实现（第二期或后续）
+玩法层
 
-- 玩法层：回合 / 胜负 / BO3 / 残机 / 三路 / 小兵 / 中 BOSS / 橹 / 天守阁 / 地图区域
-- 资源包贴图（本期只用原版粒子与音效）
+- 3v3 积分赛：600 分目标、击杀 / 拆家计分、基地占点与开局保护期、月人刷新与上限
+- **PVE 合作模式**（`/taketori match mode pve`）：所有人同一队打月人、不占点、独立结算
+- 友伤保护策略（`auto` = PVP 开 / PVE 关，可强制 `on` / `off`）
+- 大厅：出生点 / 区域 / 告示牌（加入、旁观、选角色、回大厅），队列满员自动开局，`match force` 强制开局
+- 观众模式（聊天栏可点击「退出观战」）、死亡旁观与自动复活、跨局战绩 `stats.yml`
+
+管理工具
+
+- **选区锄**（绑定下界合金锄）：左键 / 右键点方块划区域，手持时粒子描出边框，防区域重叠提示
+- **武器数据编辑 GUI**（`/taketori editor`）：三层菜单改伤害 / 冷却 / 全部参数，写回 `weapons.yml` 且保留注释
+- `/taketori doctor` 自检、`/taketori debug on` 运行时调试日志
+
+未实现（后续）
+
+- 资源包贴图（当前只用原版粒子与音效）
 - Folia 兼容（调度已收在 `SchedulerAdapter` 单一出口）
 - 多版本构建矩阵
 
@@ -319,9 +372,9 @@ debug=false（/taketori debug on 可临时开启；/taketori doctor 可自检识
 
 ## 9. 已知限制与风险
 
-- **尚未在真实 Paper 1.21.1 服务端运行验证**：本机没有该版本服务端，也没有外网。
-  已完成的验证是：离线 javac 编译通过（42 源文件 / 46 class）、core 纯度检查通过、
-  无 craftbukkit 与 net.minecraft 引用、jar 内资源齐全。**上服务器请先过一遍第 7 节清单。**
+- **实机验证请以第 7 节清单为准**：本机没有 Paper 服务端，开发期的验证方式是
+  离线 `javac` 编译（74 源文件 / 94 class）、`checkCorePurity` 与 `checkParamKeys` 两道护栏、
+  以及 `tools/` 下三个不依赖服务端的回归测试。**上服务器请先过一遍第 7 节清单。**
 - 属性采用"额外加成"语义，配置值不是最终攻击力；
 - 无客户端 Mod，因此没有自定义动作动画，技能辨识依赖粒子与音效；
 - 若某版本无法解析某个属性/粒子/音效名字，会打 warning 并跳过，不会导致插件崩溃。
