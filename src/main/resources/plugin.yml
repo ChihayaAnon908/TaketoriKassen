@@ -2,9 +2,9 @@ name: TaketoriKassen
 version: '${version}'
 main: com.taketori.kassen.TaketoriPlugin
 api-version: '1.21'
-description: '竹取合战复刻：角色 / 武器 / 技能 + 3v3 积分赛玩法（大厅、随机分队、旁观）'
-authors: [ Taketori ]
-website: 'https://github.com/'
+description: '超时空辉夜姬竹取合战 mc 复刻：角色 / 武器 / 技能 + 3v3 与 PVE 玩法（大厅、随机分队、观众）'
+authors: [ ChihayaAnon908 ]
+website: 'https://github.com/ChihayaAnon908/TaketoriKassen'
 
 commands:
   taketori:
