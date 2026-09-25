@@ -1,0 +1,1420 @@
+# 竹取合战 · 武器定义（配置模板 v9）
+#
+# config-version = 配置模板版本（不是插件版本）。
+# 插件升级时【不会覆盖】你的数值文件，所以模板更新后需要你自己同步：
+#   备份并删除 plugins/TaketoriKassen/weapons.yml → 执行 /taketori reload 重新生成
+# 启动时若检测到模板版本落后，控制台会明确提示。
+config-version: 9
+#
+# 位移类技能（self_boost / rocket_jump）默认走【纯药水】boost-mode: potion：
+#   SPEED        跑得更快（"推进"的持续感）
+#   JUMP_BOOST   跳得更高
+#   LEVITATION   自动上升（有向上分量的技能会启用；每级约 +0.05 格/tick，等级与 tick 可配）
+#   全部是原版效果，不受位置纠正与反作弊影响；原版【没有】自动水平位移的药水，
+#   所以水平方向表现为"跑得更快"，而不是"被推出去"。
+#
+# 备选路径（改一行 boost-mode 即可）：
+#   teleport     逐 tick 传送：位移最确定，但观感硬，部分服务器的反作弊/领地插件会拦截
+#   velocity     调 setVelocity：最平滑，但速度可能被位置纠正立刻清除
+#
+# 药水参数：
+#   potion-ticks / potion-speed / potion-jump / potion-slow-falling
+#   potion-levitation / potion-levitation-amplifier / potion-levitation-ticks
+#
+# 按键：左键 left / 右键 right / Shift+右键 shift-right / Q q
+#
+# ============================ 数值基准：穿全套铁甲的玩家 ============================
+# 铁甲全套 = 15 点护甲 → 减伤 15/(15+8) ≈ 65.2%，即【实际伤害 ≈ 配置伤害 × 0.35】。
+# 反推：想"对铁甲 N 击击杀"（20 血）→ 配置伤害 ≈ 20 / N × 2.87。
+#
+# ============================ 本次重做的重点：模式 = 玩法，不是数字 ============================
+# 每个 Q 模式切换都必须改变"你该怎么打"：
+#   辉夜：重锤（砸地击飞 + 火箭跳进场）↔ 火箭（远程范围压制，近战变弱）
+#   帝　：近战（最高单击 + 震地击飞）↔ 远程（投掷，但近战被削弱）
+#   雷　：防御（正常机动）↔ 壁垒（抗性更强，但给自己挂缓慢 = 用机动换硬度）
+#   月镜：镜面（反射飞行物，专治远程）↔ 爆发（主动范围控制）
+#   旗鱼：冰冻（减速）↔ 极寒（定身）
+#
+# 新增机制（详见 技能树.md）：
+#   shockwave   360° 冲击 + 向上击飞        → 辉夜重锤左键、帝震地
+#   rocket_jump 用爆炸把自己送出去           → 辉夜重锤右键
+#   pull        把敌人拉向你（与钢丝牵引相反）→ 彩叶钢丝右键
+#   reflect     把飞行物弹回发射者           → 月镜镜面模式
+#   melee_smash 连击参数 combo-bonus         → 彩叶剑左键（连续命中叠伤）
+#   projectile  定身参数 freeze-ticks        → 旗鱼极寒模式
+#   special_shot 易伤标记 mark-bonus         → 乃依（标记目标，全队收益）
+#
+# 改完执行 /taketori reload。启动与重载时会自动校验参数键与名字。
+
+weapons:
+
+  # ======================================================== 辉夜 · 火箭锤
+  kaguya_hammer:
+    character: kaguya
+    display: '<gold>火箭锤</gold>'
+    material: DIAMOND_SHOVEL
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>重锤模式=砸地冲击 / 火箭模式=锤击'
+      - '<gray>右键 <white>重锤模式=火箭跳 / 火箭模式=火箭弹'
+      - '<gray>Shift+右键 <white>喷射推进'
+      - '<gray>Q <white>重锤 / 火箭 模式切换'
+    attributes:
+      attack-damage: 16.0
+      attack-speed: 1.0
+    default-mode: HAMMER
+    modes:
+      HAMMER:
+        display: '<yellow>重锤模式</yellow>'
+        skills:
+          left:
+            type: shockwave
+            cooldown: 0
+            params:
+              display: '砸地冲击'
+              damage: 14.0
+              radius: 3.5
+              knockback: 0.4
+              launch: 0.5
+              min-falloff: 0.6
+              particle: EXPLOSION
+              sound: BLOCK_ANVIL_LAND
+          right:
+            type: rocket_jump
+            cooldown: 6.0
+            params:
+              display: '火箭跳'
+              upward: 0.95
+              backward: 0.45
+              self-damage: 0.0
+              fall-immunity-ticks: 80
+              # 落地后仍有 2 秒跳跃提升 VI，接得上第二段火箭跳
+              potion-jump: 5      # 5 = VI 级（0 = I 级）
+              potion-ticks: 40    # 40 tick = 2 秒
+              particle: EXPLOSION
+              sound: ENTITY_GENERIC_EXPLODE
+      ROCKET:
+        display: '<red>火箭模式</red>'
+        skills:
+          left:
+            type: melee_smash
+            cooldown: 0
+            params:
+              display: '锤击'
+              damage: 10.0
+              range: 3.2
+              angle: 55
+              knockback: 0.35
+              particle: SWEEP_ATTACK
+              sound: ENTITY_PLAYER_ATTACK_STRONG
+          right:
+            type: projectile
+            cooldown: 3.0
+            params:
+              display: '火箭弹'
+              projectile: SMALL_FIREBALL
+              speed: 1.8
+              damage: 16.0
+              radius: 2.5
+              ignite: true
+              ignite-ticks: 40
+              min-falloff: 0.6
+              particle: FLAME
+              hit-particle: FLAME
+              sound: ENTITY_FIREWORK_ROCKET_LAUNCH
+              hit-sound: ENTITY_GENERIC_EXPLODE
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '锤击'
+          damage: 12.0
+          range: 3.2
+          angle: 55
+          knockback: 0.4
+          particle: SWEEP_ATTACK
+          sound: ENTITY_PLAYER_ATTACK_STRONG
+      right:
+        type: projectile
+        cooldown: 3.0
+        params:
+          display: '火箭弹'
+          projectile: SMALL_FIREBALL
+          speed: 1.6
+          damage: 14.0
+          radius: 2.0
+          ignite: true
+          ignite-ticks: 30
+          min-falloff: 0.6
+          particle: FLAME
+          hit-particle: FLAME
+          sound: ENTITY_FIREWORK_ROCKET_LAUNCH
+          hit-sound: ENTITY_GENERIC_EXPLODE
+      shift-right:
+        type: self_boost
+        cooldown: 8.0
+        params:
+          display: '喷射推进'
+          power: 1.45
+          upward: 0.3
+          min-lift: 0.42
+          boost-ticks: 4
+          boost-keep-ratio: 0.7
+          fall-immunity-ticks: 70
+          particle: CLOUD
+          sound: ENTITY_FIREWORK_ROCKET_SHOOT
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 帝 · 金棒
+  mikado_konbo:
+    character: mikado
+    display: '<dark_purple>金棒</dark_purple>'
+    material: NETHERITE_AXE
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>金棒攻击（远程模式会削弱）'
+      - '<gray>右键 <white>近战模式=切远程 / 远程模式=金棒投掷'
+      - '<gray>Shift+右键 <white>金棒震地（击飞）/ 崩山一击'
+      - '<gray>Q <white>近战 / 远程 模式切换'
+    attributes:
+      attack-damage: 18.0
+      attack-speed: 0.9
+    default-mode: MELEE
+    modes:
+      MELEE:
+        display: '<yellow>近战模式</yellow>'
+        skills:
+          right:
+            type: mode_switch
+            cooldown: 0.5
+            params: { }
+          shift-right:
+            type: shockwave
+            cooldown: 6.0
+            params:
+              display: '金棒震地'
+              damage: 22.0
+              radius: 3.5
+              knockback: 0.6
+              launch: 0.6
+              min-falloff: 0.6
+              particle: EXPLOSION
+              sound: BLOCK_ANVIL_LAND
+      RANGED:
+        display: '<aqua>远程模式</aqua>'
+        skills:
+          left:
+            type: melee_smash
+            cooldown: 0
+            params:
+              display: '金棒扫击'
+              damage: 12.0
+              range: 3.0
+              angle: 50
+              knockback: 0.3
+              particle: ENCHANTED_HIT
+              sound: ENTITY_PLAYER_ATTACK_STRONG
+          right:
+            type: projectile
+            cooldown: 1.2
+            params:
+              display: '金棒投掷'
+              projectile: SNOWBALL
+              gravity: false
+              speed: 2.4
+              damage: 11.0
+              radius: 1.5
+              particle: CRIT
+              hit-particle: CRIT
+              sound: ENTITY_SNOWBALL_THROW
+              hit-sound: ENTITY_PLAYER_ATTACK_STRONG
+          shift-right:
+            type: projectile
+            cooldown: 7.0
+            params:
+              display: '崩山一击'
+              projectile: SNOWBALL
+              gravity: false
+              speed: 2.0
+              damage: 18.0
+              radius: 3.0
+              knockback: 0.8
+              particle: ENCHANTED_HIT
+              hit-particle: ENCHANTED_HIT
+              sound: ENTITY_SNOWBALL_THROW
+              hit-sound: ENTITY_GENERIC_EXPLODE
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '金棒攻击'
+          damage: 18.0
+          range: 3.0
+          angle: 50
+          knockback: 0.4
+          particle: ENCHANTED_HIT
+          sound: ENTITY_PLAYER_ATTACK_STRONG
+      right:
+        type: mode_switch
+        cooldown: 0.5
+        params: { }
+      shift-right:
+        type: melee_smash
+        cooldown: 6.0
+        params:
+          display: '金棒重击'
+          damage: 20.0
+          range: 3.4
+          angle: 65
+          knockback: 1.0
+          particle: EXPLOSION
+          sound: BLOCK_ANVIL_LAND
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 彩叶 · 剑（连击）
+  iroha_sword:
+    character: iroha
+    display: '<white>彩叶之剑</white>'
+    material: NETHERITE_SWORD
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>剑击（连续命中伤害递增）'
+      - '<gray>右键 <white>高速突进'
+      - '<gray>Shift+右键 <white>强化机动（上抛）'
+      - '<gray>Q <white>切换到钢丝 / 苦无'
+    attributes:
+      attack-damage: 11.0
+      attack-speed: 1.6
+    default-mode: SWORD
+    modes:
+      SWORD:
+        display: '<white>剑模式</white>'
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '剑击'
+          damage: 10.0
+          range: 3.2
+          angle: 50
+          knockback: 0.3
+          combo-bonus: 0.25
+          combo-window: 20     # 连击窗口 1 秒：1 秒内没有新的命中 → 伤害衰减回基础值 10
+          combo-cap: 20.0      # 连击叠伤上限：不管叠到多少段，单击伤害不超过 20
+          particle: SWEEP_ATTACK
+          sound: ENTITY_PLAYER_ATTACK_SWEEP
+      right:
+        type: self_boost
+        cooldown: 7.0
+        params:
+          display: '高速突进'
+          power: 1.6
+          upward: 0.06
+          min-lift: 0.42
+          boost-ticks: 4
+          boost-keep-ratio: 0.7
+          fall-immunity-ticks: 50
+          particle: CLOUD
+          sound: ENTITY_ENDERMAN_TELEPORT
+      shift-right:
+        type: self_boost
+        cooldown: 12.0
+        params:
+          display: '强化机动'
+          power: 1.05
+          upward: 0.55
+          min-lift: 0.45
+          boost-ticks: 3
+          boost-keep-ratio: 0.6
+          fall-immunity-ticks: 70
+          particle: END_ROD
+          sound: ENTITY_ILLUSIONER_MIRROR_MOVE
+      q:
+        type: equip_switch
+        cooldown: 1.0
+        params:
+          target: iroha_wire
+
+  # ======================================================== 彩叶 · 钢丝 / 苦无（拉人）
+  iroha_wire:
+    character: iroha
+    display: '<gray>钢丝 / 苦无</gray>'
+    material: FISHING_ROD
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>—（无技能）'
+      - '<gray>右键 <white>钢丝牵引（把敌人拉向你）'
+      - '<gray>Shift+右键 <white>快速位移'
+      - '<gray>Q <white>切换到剑'
+    attributes:
+      attack-speed: 1.2
+    default-mode: WIRE
+    modes:
+      WIRE:
+        display: '<gray>钢丝模式</gray>'
+    skills:
+      right:
+        type: pull
+        cooldown: 6.0
+        params:
+          display: '钢丝牵引'
+          mode: auto
+          range: 14.0
+          power: 0.55
+          duration: 0.4
+          angle: 50
+          damage: 0.0
+          particle: END_ROD
+          sound: ITEM_TRIDENT_RETURN
+      shift-right:
+        type: blink
+        cooldown: 4.0
+        params:
+          display: '快速位移'
+          distance: 6.0
+          particle: END_ROD
+          sound: ENTITY_ENDERMAN_TELEPORT
+      q:
+        type: equip_switch
+        cooldown: 1.0
+        params:
+          target: iroha_sword
+
+  # ======================================================== 乃依 · 弓（易伤标记）
+  noi_bow:
+    character: noi
+    display: '<green>乃依之弓</green>'
+    material: BOW
+    model-data: 0
+    lore:
+      - '<gray>左键 / 右键 <white>原版蓄力射击'
+      - '<gray>Shift+右键 <white>切换特殊射击（强化 + 易伤标记）'
+      - '<gray>Q <white>单发射击 / 三连射'
+      - '<gray>命中 <white>随机附加一种负面效果（减速 / 虚弱 / 中毒…）'
+    attributes:
+      attack-speed: 1.0
+    # 命中附加：箭射中敌人时，从下面随机抽一种负面效果施加（乃依的压制手段）
+    #   同队玩家免疫；效果名用原版药水效果名，写错只会在 debug 日志里点名，不会报错
+    hit-effects:
+      arrow-debuffs: [ SLOWNESS, WEAKNESS, POISON, BLINDNESS, HUNGER, NAUSEA ]
+      arrow-debuff-ticks: 80      # 持续 4 秒
+      arrow-debuff-amplifier: 0   # 等级：0 = I 级，1 = II 级
+      arrow-debuff-chance: 1.0    # 触发概率：1.0 = 每箭必中；0.5 = 一半概率
+    default-mode: NORMAL
+    modes:
+      NORMAL:
+        display: '<green>单发射击</green>'
+      VOLLEY:
+        display: '<red>三连射</red>'
+    skills:
+      shift-right:
+        type: special_shot_toggle
+        cooldown: 1.0
+        params:
+          display: '特殊射击'
+          # 特殊射击（按 Shift+右键切换，ActionBar 会提示开启/关闭）：
+          # 命中时伤害更高 + 范围溅射 + 给目标打易伤标记，并且箭会带飞行拖尾
+          damage-multiplier: 1.5
+          speed-multiplier: 1.15
+          hit-radius: 2.0          # 命中时对周围 2 格内的其他敌人溅射
+          hit-radius-ratio: 0.3    # 溅射伤害 = 主伤害 × 0.3
+          trail-particle: CRIT     # 飞行拖尾粒子，让强化箭肉眼可辨（留空 = 不显示）
+          mark-bonus: 0.25         # 被打中的人受到的所有伤害 +25%
+          mark-ticks: 100          # 标记持续 5 秒
+          # 三连射（Q 切到 VOLLEY 模式后生效）：
+          volley-interval: 2       # 每支箭间隔 2 tick —— 同时发射会完全重叠、看起来只有一支
+          volley-spread: 1.5       # 每支箭的微小散布角（度）；0 = 完全同向
+          particle: CRIT
+          sound: BLOCK_BEACON_ACTIVATE
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 雷 · 大盾（用机动换硬度）
+  rai_shield:
+    character: rai
+    display: '<aqua>大盾</aqua>'
+    material: SHIELD
+    model-data: 0
+    lore:
+      - '<gray>右键 <white>举盾（原版）'
+      - '<gray>Shift+右键 <white>防御模式=强化防御 / 壁垒模式=壁垒（更硬但更慢）'
+      - '<gray>Q <white>防御 / 壁垒 模式切换'
+    attributes:
+      attack-speed: 1.2
+    default-mode: GUARD
+    modes:
+      GUARD:
+        display: '<aqua>防御模式</aqua>'
+      BULWARK:
+        display: '<blue>壁垒模式</blue>'
+        skills:
+          shift-right:
+            type: shield_guard
+            cooldown: 22.0
+            params:
+              display: '壁垒'
+              duration-ticks: 140
+              resistance-amplifier: 2
+              absorption: 10.0
+              reflect-ratio: 0.6
+              self-slow-amplifier: 2
+              self-slow-ticks: 140
+              particle: ENCHANTED_HIT
+              sound: BLOCK_ANVIL_LAND
+    skills:
+      shift-right:
+        type: shield_guard
+        cooldown: 16.0
+        params:
+          display: '强化防御'
+          duration-ticks: 100
+          resistance-amplifier: 1
+          absorption: 6.0
+          reflect-ratio: 0.3
+          particle: ENCHANTED_HIT
+          sound: BLOCK_ANVIL_LAND
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 八千代 · 月镜（反制）
+  moon_mirror:
+    character: yachiyo
+    display: '<light_purple>月镜</light_purple>'
+    material: GLASS_PANE
+    model-data: 0
+    lore:
+      - '<gray>右键 <white>镜面模式=反射飞行物 / 爆发模式=镜光爆发'
+      - '<gray>Shift+右键 <white>镜光爆发（两种模式都有）'
+      - '<gray>Q <white>镜面 / 爆发 模式切换'
+    attributes:
+      attack-speed: 1.0
+    default-mode: MIRROR
+    modes:
+      MIRROR:
+        display: '<light_purple>镜面模式</light_purple>'
+        skills:
+          right:
+            type: reflect
+            cooldown: 14.0
+            params:
+              display: '镜面展开'
+              duration-ticks: 100
+              speed-multiplier: 1.0
+              absorption: 4.0
+              particle: END_ROD
+              sound: BLOCK_GLASS_BREAK
+      BURST:
+        display: '<pink>爆发模式</pink>'
+        skills:
+          right:
+            type: mirror_burst
+            cooldown: 12.0
+            params:
+              display: '镜光爆发'
+              radius: 5.5
+              damage: 14.0
+              slow-duration: 80
+              slow-amplifier: 1
+              blindness-ticks: 40
+              particle: END_ROD
+              sound: BLOCK_GLASS_BREAK
+    skills:
+      right:
+        type: reflect
+        cooldown: 14.0
+        params:
+          display: '镜面展开'
+          duration-ticks: 100
+          speed-multiplier: 1.0
+          absorption: 4.0
+          particle: END_ROD
+          sound: BLOCK_GLASS_BREAK
+      shift-right:
+        type: mirror_burst
+        cooldown: 20.0
+        params:
+          display: '镜光爆发'
+          radius: 5.0
+          damage: 12.0
+          slow-duration: 60
+          slow-amplifier: 1
+          blindness-ticks: 40
+          particle: END_ROD
+          sound: BLOCK_GLASS_BREAK
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 八千代 · 冰冻旗鱼（控制）
+  frozen_swordfish:
+    character: yachiyo
+    display: '<blue>冰冻旗鱼</blue>'
+    material: TRIDENT
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>冰冻近战（减速）'
+      - '<gray>右键 <white>冰冻模式=冰冻弹 / 极寒模式=冻结弹（定身）'
+      - '<gray>Shift+右键 <white>强化冰冻（定身 + 大范围）'
+      - '<gray>Q <white>冰冻 / 极寒 模式切换'
+    attributes:
+      attack-damage: 12.0
+      attack-speed: 1.1
+    default-mode: FROST
+    modes:
+      FROST:
+        display: '<blue>冰冻模式</blue>'
+      GLACIER:
+        display: '<dark_aqua>极寒模式（控制流）</dark_aqua>'
+        skills:
+          left:
+            type: melee_smash
+            cooldown: 0
+            params:
+              display: '冰霜重击'
+              damage: 8.0
+              range: 3.2
+              angle: 50
+              knockback: 0.3
+              slow-duration: 60
+              slow-amplifier: 1
+              freeze-ticks: 20
+              particle: SNOWFLAKE
+              sound: ENTITY_PLAYER_HURT_FREEZE
+          right:
+            type: projectile
+            cooldown: 7.0
+            params:
+              display: '冻结弹'
+              projectile: SNOWBALL
+              speed: 1.9
+              damage: 6.0
+              radius: 2.5
+              slow-duration: 120
+              slow-amplifier: 2
+              freeze-ticks: 40
+              particle: SNOWFLAKE
+              hit-particle: SNOWFLAKE
+              sound: ITEM_TRIDENT_THROW
+              hit-sound: BLOCK_GLASS_BREAK
+          shift-right:
+            type: shockwave
+            cooldown: 18.0
+            params:
+              display: '冰封领域'
+              damage: 6.0
+              radius: 4.5
+              knockback: 0.2
+              launch: 0.2
+              min-falloff: 0.8
+              slow-duration: 120
+              slow-amplifier: 2
+              freeze-ticks: 30
+              particle: SNOWFLAKE
+              sound: BLOCK_GLASS_BREAK
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '冰冻近战'
+          damage: 12.0
+          range: 3.2
+          angle: 50
+          knockback: 0.35
+          slow-duration: 40
+          slow-amplifier: 0
+          particle: SNOWFLAKE
+          sound: ENTITY_PLAYER_HURT_FREEZE
+      right:
+        type: projectile
+        cooldown: 4.0
+        params:
+          display: '冰冻弹'
+          projectile: SNOWBALL
+          speed: 1.8
+          damage: 12.0
+          radius: 2.0
+          slow-duration: 80
+          slow-amplifier: 1
+          particle: SNOWFLAKE
+          hit-particle: SNOWFLAKE
+          sound: ITEM_TRIDENT_THROW
+          hit-sound: BLOCK_GLASS_BREAK
+      shift-right:
+        type: projectile
+        cooldown: 12.0
+        params:
+          display: '强化冰冻弹'
+          projectile: SNOWBALL
+          speed: 1.5
+          damage: 16.0
+          radius: 3.5
+          slow-duration: 120
+          slow-amplifier: 2
+          freeze-ticks: 20
+          particle: SNOWFLAKE
+          hit-particle: SNOWFLAKE
+          sound: ITEM_TRIDENT_THROW
+          hit-sound: ENTITY_GENERIC_EXPLODE
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 雷 · 壁垒令旗（第二件装备）
+  # 与盾一起在绑定角色时发放，用 1 / 2 键切换；两种模式改变"右键"的机制（防御 / 冲锋）
+  rai_banner:
+    character: rai
+    display: '<white>壁垒令旗</white>'
+    material: WHITE_BANNER
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>旗杆扫击'
+      - '<gray>右键 <white>固守模式=旗阵 / 冲锋模式=冲锋'
+      - '<gray>Shift+右键 <white>震旗（击退周围敌人）'
+      - '<gray>Q <white>固守 / 冲锋 模式切换'
+    attributes:
+      attack-speed: 1.0
+    default-mode: HOLD
+    modes:
+      HOLD:
+        display: '<aqua>固守模式</aqua>'
+        skills:
+          right:
+            type: shield_guard
+            cooldown: 18.0
+            params:
+              display: '旗阵'
+              duration-ticks: 120
+              resistance-amplifier: 1
+              absorption: 8.0
+              reflect-ratio: 0.35
+              particle: ENCHANTED_HIT
+              sound: BLOCK_BEACON_ACTIVATE
+      CHARGE:
+        display: '<red>冲锋模式</red>'
+        skills:
+          right:
+            type: self_boost
+            cooldown: 8.0
+            params:
+              display: '冲锋'
+              power: 1.55
+              upward: 0.2
+              min-lift: 0.42
+              boost-ticks: 4
+              boost-keep-ratio: 0.7
+              fall-immunity-ticks: 70
+              particle: CLOUD
+              sound: ENTITY_ENDERMAN_TELEPORT
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '旗杆扫击'
+          damage: 10.0
+          range: 3.2
+          angle: 55
+          knockback: 0.5
+          particle: SWEEP_ATTACK
+          sound: ENTITY_PLAYER_ATTACK_SWEEP
+      right:
+        type: shield_guard
+        cooldown: 18.0
+        params:
+          display: '旗阵'
+          duration-ticks: 120
+          resistance-amplifier: 1
+          absorption: 8.0
+          reflect-ratio: 0.35
+          particle: ENCHANTED_HIT
+          sound: BLOCK_BEACON_ACTIVATE
+      shift-right:
+        type: shockwave
+        cooldown: 8.0
+        params:
+          display: '震旗'
+          damage: 12.0
+          radius: 3.5
+          knockback: 0.8
+          launch: 0.4
+          min-falloff: 0.6
+          particle: EXPLOSION
+          sound: BLOCK_ANVIL_LAND
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 帝 · 大太刀（第二件 · 进攻）
+  # 与金棒互补：金棒是"一拳流"，太刀是"慢速高伤 + 剑气"，攻速更低但单击更重
+  mikado_odachi:
+    character: mikado
+    display: '<dark_red>帝之大太刀</dark_red>'
+    material: DIAMOND_SWORD
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>太刀斩（慢速高伤）'
+      - '<gray>右键 <white>斩击波（两种模式相同）'
+      - '<gray>Shift+右键 <white>居合斩（单点重击）/ 回旋斩'
+      - '<gray>Q <white>居合 / 扫荡 模式切换'
+      - '<gray>1 / 2 <white>切换金棒 / 太刀'
+    attributes:
+      attack-damage: 15.0
+      attack-speed: 0.9
+    default-mode: IAI
+    modes:
+      IAI:
+        display: '<dark_red>居合模式</dark_red>'
+      SWEEP:
+        display: '<red>扫荡模式</red>'
+        skills:
+          left:
+            type: melee_smash
+            cooldown: 0
+            params:
+              display: '横扫'
+              damage: 11.0
+              range: 4.2
+              angle: 130
+              knockback: 0.35
+              particle: SWEEP_ATTACK
+              sound: ENTITY_PLAYER_ATTACK_SWEEP
+          shift-right:
+            type: shockwave
+            cooldown: 9.0
+            params:
+              display: '回旋斩'
+              damage: 14.0
+              radius: 3.6
+              knockback: 0.6
+              launch: 0.25
+              min-falloff: 0.6
+              particle: SWEEP_ATTACK
+              sound: ENTITY_PLAYER_ATTACK_SWEEP
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '太刀斩'
+          damage: 15.0
+          range: 3.8
+          angle: 45
+          knockback: 0.3
+          particle: SWEEP_ATTACK
+          sound: ENTITY_PLAYER_ATTACK_STRONG
+      right:
+        type: projectile
+        cooldown: 4.0
+        params:
+          display: '斩击波'
+          projectile: SNOWBALL
+          gravity: false
+          speed: 2.6
+          damage: 11.0
+          radius: 1.6
+          knockback: 0.3
+          particle: SWEEP_ATTACK
+          hit-particle: CRIT
+          sound: ENTITY_PLAYER_ATTACK_SWEEP
+          hit-sound: ENTITY_PLAYER_ATTACK_STRONG
+      shift-right:
+        type: melee_smash
+        cooldown: 8.0
+        params:
+          display: '居合斩'
+          damage: 20.0
+          range: 3.8
+          angle: 35
+          knockback: 0.5
+          particle: CRIT
+          sound: BLOCK_ANVIL_LAND
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 乃依 · 短匕（第二件 · 自保）
+  # 弓手被贴脸时的答案：快速短打 + 位移拉开距离，伤害刻意压得比主武器低
+  noi_dagger:
+    character: noi
+    display: '<green>乃依之匕</green>'
+    material: IRON_SWORD
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>短匕刺击'
+      - '<gray>右键 <white>近战模式=闪身位移 / 投掷模式=飞匕'
+      - '<gray>Shift+右键 <white>推开贴近的敌人'
+      - '<gray>Q <white>近战 / 投掷 模式切换'
+      - '<gray>1 / 2 <white>切换弓 / 短匕'
+    attributes:
+      attack-damage: 9.0
+      attack-speed: 1.6
+    default-mode: MELEE
+    modes:
+      MELEE:
+        display: '<green>近战模式</green>'
+      THROW:
+        display: '<yellow>投掷模式</yellow>'
+        skills:
+          right:
+            type: projectile
+            cooldown: 1.2
+            params:
+              display: '飞匕'
+              projectile: SNOWBALL
+              gravity: false
+              speed: 2.8
+              damage: 8.0
+              radius: 1.0
+              particle: CRIT
+              hit-particle: CRIT
+              sound: ENTITY_SNOWBALL_THROW
+              hit-sound: ENTITY_PLAYER_ATTACK_STRONG
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '短匕刺击'
+          damage: 9.0
+          range: 2.6
+          angle: 40
+          knockback: 0.15
+          particle: CRIT
+          sound: ENTITY_PLAYER_ATTACK_STRONG
+      right:
+        type: blink
+        cooldown: 9.0
+        params:
+          display: '闪身位移'
+          distance: 5.0
+          particle: CLOUD
+          sound: ENTITY_ENDERMAN_TELEPORT
+      shift-right:
+        type: shockwave
+        cooldown: 12.0
+        params:
+          display: '推开'
+          damage: 7.0
+          radius: 2.8
+          knockback: 0.75
+          launch: 0.2
+          min-falloff: 0.5
+          particle: CLOUD
+          sound: ENTITY_GENERIC_EXPLODE
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 宅公 · 忠犬之牙（主武器 · 咬合）
+  takumi_fang:
+    character: takumi
+    display: '<gold>忠犬之牙</gold>'
+    material: BONE
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>咬击（短打，攻速快）'
+      - '<gray>右键 <white>咬合拖拽（把前方敌人拉近）'
+      - '<gray>Shift+右键 <white>猛咬（单点重击）'
+      - '<gray>Q <white>咬合 / 守势 模式切换'
+      - '<gray>1 / 2 <white>切换牙 / 锁'
+    attributes:
+      attack-damage: 10.0
+      attack-speed: 1.6
+    default-mode: BITE
+    modes:
+      BITE:
+        display: '<gold>咬合模式</gold>'
+      GUARD:
+        display: '<yellow>守势模式</yellow>'
+        skills:
+          right:
+            type: shield_guard
+            cooldown: 16.0
+            params:
+              display: '护主架势'
+              duration-ticks: 80
+              resistance-amplifier: 0
+              absorption: 5.0
+              reflect-ratio: 0.0
+              particle: ENCHANTED_HIT
+              sound: BLOCK_ANVIL_LAND
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '咬击'
+          damage: 10.0
+          range: 2.8
+          angle: 45
+          knockback: 0.2
+          particle: CRIT
+          sound: ENTITY_PLAYER_ATTACK_STRONG
+      right:
+        type: pull
+        cooldown: 7.0
+        params:
+          display: '咬合拖拽'
+          mode: auto
+          range: 8.0
+          power: 0.6
+          duration: 0.4
+          angle: 45
+          damage: 2.0
+          particle: CRIT
+          sound: ENTITY_WOLF_GROWL
+      shift-right:
+        type: melee_smash
+        cooldown: 7.0
+        params:
+          display: '猛咬'
+          damage: 14.0
+          range: 3.0
+          angle: 60
+          knockback: 0.4
+          particle: CRIT
+          sound: ENTITY_PLAYER_ATTACK_STRONG
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 宅公 · 忠犬之锁（第二件 · 控场）
+  takumi_collar:
+    character: takumi
+    display: '<gold>忠犬之锁</gold>'
+    material: LEAD
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>锁链抽击'
+      - '<gray>右键 <white>守势模式=咆哮震开 / 追猎模式=钩索位移'
+      - '<gray>Shift+右键 <white>守势模式=缩紧防线 / 追猎模式=向前冲刺'
+      - '<gray>Q <white>守势 / 追猎 模式切换'
+      - '<gray>1 / 2 <white>切换牙 / 锁'
+    attributes:
+      attack-speed: 1.2
+    default-mode: WARD
+    modes:
+      WARD:
+        display: '<gold>守势模式</gold>'
+      CHASE:
+        display: '<yellow>追猎模式</yellow>'
+        skills:
+          right:
+            type: grapple
+            cooldown: 9.0
+            params:
+              display: '钩索位移'
+              range: 18.0
+              power: 1.25
+              upward: 0.35
+              particle: CRIT
+              sound: ITEM_TRIDENT_RETURN
+          shift-right:
+            type: self_boost
+            cooldown: 10.0
+            params:
+              display: '冲刺'
+              power: 1.5
+              upward: 0.18
+              min-lift: 0.4
+              boost-ticks: 4
+              boost-keep-ratio: 0.7
+              fall-immunity-ticks: 60
+              particle: CLOUD
+              sound: ENTITY_ENDERMAN_TELEPORT
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '锁链抽击'
+          damage: 8.0
+          range: 3.2
+          angle: 50
+          knockback: 0.3
+          particle: CRIT
+          sound: ENTITY_PLAYER_ATTACK_STRONG
+      right:
+        type: shockwave
+        cooldown: 13.0
+        params:
+          display: '看门犬咆哮'
+          damage: 8.0
+          radius: 3.4
+          knockback: 0.7
+          launch: 0.25
+          min-falloff: 0.6
+          slow-duration: 40
+          slow-amplifier: 0
+          particle: CLOUD
+          sound: ENTITY_GENERIC_EXPLODE
+      shift-right:
+        type: shield_guard
+        cooldown: 18.0
+        params:
+          display: '缩紧防线'
+          duration-ticks: 90
+          resistance-amplifier: 1
+          absorption: 5.0
+          reflect-ratio: 0.15
+          particle: ENCHANTED_HIT
+          sound: BLOCK_ANVIL_LAND
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 真实 · 真实之铳（主武器 · 点射）
+  masami_gun:
+    character: masami
+    display: '<gray>真实之铳</gray>'
+    material: CROSSBOW
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>枪托敲击'
+      - '<gray>右键 <white>点射模式=精准射击 / 速射模式=快速点射'
+      - '<gray>Shift+右键 <white>贯穿射击（高伤直线）'
+      - '<gray>Q <white>点射 / 速射 模式切换'
+      - '<gray>1 / 2 <white>切换铳 / 镜'
+    attributes:
+      attack-speed: 1.0
+    default-mode: SINGLE
+    modes:
+      SINGLE:
+        display: '<gray>点射模式</gray>'
+      BURST:
+        display: '<yellow>速射模式</yellow>'
+        skills:
+          right:
+            type: projectile
+            cooldown: 0.9
+            params:
+              display: '速射'
+              projectile: SNOWBALL
+              gravity: false
+              speed: 3.0
+              damage: 6.0
+              radius: 0.8
+              particle: CRIT
+              hit-particle: CRIT
+              sound: ENTITY_SNOWBALL_THROW
+              hit-sound: ENTITY_PLAYER_ATTACK_STRONG
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '枪托敲击'
+          damage: 7.0
+          range: 2.6
+          angle: 45
+          knockback: 0.35
+          particle: CRIT
+          sound: ENTITY_PLAYER_ATTACK_STRONG
+      right:
+        type: projectile
+        cooldown: 1.6
+        params:
+          display: '精准射击'
+          projectile: SNOWBALL
+          gravity: false
+          speed: 3.4
+          damage: 11.0
+          radius: 0.9
+          knockback: 0.2
+          particle: CRIT
+          hit-particle: CRIT
+          sound: ENTITY_SNOWBALL_THROW
+          hit-sound: ENTITY_PLAYER_ATTACK_STRONG
+      shift-right:
+        type: projectile
+        cooldown: 10.0
+        params:
+          display: '贯穿射击'
+          projectile: SNOWBALL
+          gravity: false
+          speed: 4.0
+          damage: 16.0
+          radius: 1.0
+          knockback: 0.35
+          particle: END_ROD
+          hit-particle: CRIT
+          sound: ITEM_TRIDENT_THROW
+          hit-sound: ENTITY_GENERIC_EXPLODE
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 真实 · 真实之镜（第二件 · 侦察位移）
+  masami_lens:
+    character: masami
+    display: '<white>真实之镜</white>'
+    material: SPYGLASS
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>镜身敲击'
+      - '<gray>右键 <white>观测模式=闪现位移 / 封锁模式=减速弹'
+      - '<gray>Shift+右键 <white>观测模式=钩索位移 / 封锁模式=封锁冲击'
+      - '<gray>Q <white>观测 / 封锁 模式切换'
+      - '<gray>1 / 2 <white>切换铳 / 镜'
+    attributes:
+      attack-speed: 1.0
+    default-mode: OBSERVE
+    modes:
+      OBSERVE:
+        display: '<white>观测模式</white>'
+      LOCK:
+        display: '<yellow>封锁模式</yellow>'
+        skills:
+          right:
+            type: projectile
+            cooldown: 4.0
+            params:
+              display: '减速弹'
+              projectile: SNOWBALL
+              gravity: false
+              speed: 2.6
+              damage: 6.0
+              radius: 1.6
+              slow-duration: 60
+              slow-amplifier: 1
+              particle: SNOWFLAKE
+              hit-particle: SNOWFLAKE
+              sound: ENTITY_SNOWBALL_THROW
+              hit-sound: BLOCK_GLASS_BREAK
+          shift-right:
+            type: shockwave
+            cooldown: 14.0
+            params:
+              display: '封锁冲击'
+              damage: 7.0
+              radius: 3.6
+              knockback: 0.5
+              launch: 0.15
+              min-falloff: 0.6
+              slow-duration: 80
+              slow-amplifier: 1
+              particle: SNOWFLAKE
+              sound: BLOCK_GLASS_BREAK
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '镜身敲击'
+          damage: 7.0
+          range: 2.8
+          angle: 45
+          knockback: 0.3
+          particle: CRIT
+          sound: ENTITY_PLAYER_ATTACK_STRONG
+      right:
+        type: blink
+        cooldown: 8.0
+        params:
+          display: '闪现'
+          distance: 6.0
+          particle: END_ROD
+          sound: ENTITY_ENDERMAN_TELEPORT
+      shift-right:
+        type: grapple
+        cooldown: 12.0
+        params:
+          display: '钩索位移'
+          range: 20.0
+          power: 1.3
+          upward: 0.4
+          particle: END_ROD
+          sound: ITEM_TRIDENT_RETURN
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 芦花 · 芦花之苇（主武器 · 疾风）
+  ashika_reed:
+    character: ashika
+    display: '<aqua>芦花之苇</aqua>'
+    material: SUGAR_CANE
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>苇叶横扫（攻速最快）'
+      - '<gray>右键 <white>疾风模式=风刃 / 劲风模式=风压冲击'
+      - '<gray>Shift+右键 <white>乘风（借风前冲）'
+      - '<gray>Q <white>疾风 / 劲风 模式切换'
+      - '<gray>1 / 2 <white>切换苇 / 丝'
+    attributes:
+      attack-damage: 8.0
+      attack-speed: 1.8
+    default-mode: GALE
+    modes:
+      GALE:
+        display: '<aqua>疾风模式</aqua>'
+      STORM:
+        display: '<blue>劲风模式</blue>'
+        skills:
+          right:
+            type: shockwave
+            cooldown: 8.0
+            params:
+              display: '风压冲击'
+              damage: 10.0
+              radius: 4.0
+              knockback: 0.8
+              launch: 0.3
+              min-falloff: 0.55
+              particle: CLOUD
+              sound: ENTITY_GENERIC_EXPLODE
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '苇叶横扫'
+          damage: 8.0
+          range: 3.4
+          angle: 70
+          knockback: 0.2
+          particle: SWEEP_ATTACK
+          sound: ENTITY_PLAYER_ATTACK_SWEEP
+      right:
+        type: projectile
+        cooldown: 2.4
+        params:
+          display: '风刃'
+          projectile: SNOWBALL
+          gravity: false
+          speed: 3.2
+          damage: 7.0
+          radius: 1.1
+          particle: CLOUD
+          hit-particle: CLOUD
+          sound: ENTITY_SNOWBALL_THROW
+          hit-sound: ENTITY_PLAYER_ATTACK_SWEEP
+      shift-right:
+        type: self_boost
+        cooldown: 8.0
+        params:
+          display: '乘风'
+          power: 1.45
+          upward: 0.3
+          min-lift: 0.4
+          boost-ticks: 4
+          boost-keep-ratio: 0.7
+          fall-immunity-ticks: 60
+          particle: CLOUD
+          sound: ENTITY_ENDERMAN_TELEPORT
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
+
+  # ======================================================== 芦花 · 绫䌷之丝（第二件 · 控制）
+  ashika_thread:
+    character: ashika
+    display: '<light_purple>绫䌷之丝</light_purple>'
+    material: STRING
+    model-data: 0
+    lore:
+      - '<gray>左键 <white>丝线拂击'
+      - '<gray>右键 <white>缠绕模式=丝线拉拽 / 缚足模式=缚足弹（减速）'
+      - '<gray>Shift+右键 <white>缠绕模式=丝网束缚 / 缚足模式=闪身'
+      - '<gray>Q <white>缠绕 / 缚足 模式切换'
+      - '<gray>1 / 2 <white>切换苇 / 丝'
+    attributes:
+      attack-speed: 1.4
+    default-mode: BIND
+    modes:
+      BIND:
+        display: '<light_purple>缠绕模式</light_purple>'
+      SNARE:
+        display: '<yellow>缚足模式</yellow>'
+        skills:
+          right:
+            type: projectile
+            cooldown: 3.0
+            params:
+              display: '缚足弹'
+              projectile: SNOWBALL
+              gravity: false
+              speed: 2.8
+              damage: 5.0
+              radius: 1.5
+              slow-duration: 80
+              slow-amplifier: 2
+              particle: END_ROD
+              hit-particle: END_ROD
+              sound: ENTITY_SNOWBALL_THROW
+              hit-sound: BLOCK_GLASS_BREAK
+          shift-right:
+            type: blink
+            cooldown: 7.0
+            params:
+              display: '闪身'
+              distance: 5.5
+              particle: END_ROD
+              sound: ENTITY_ENDERMAN_TELEPORT
+    skills:
+      left:
+        type: melee_smash
+        cooldown: 0
+        params:
+          display: '丝线拂击'
+          damage: 7.0
+          range: 3.2
+          angle: 55
+          knockback: 0.2
+          particle: SWEEP_ATTACK
+          sound: ENTITY_PLAYER_ATTACK_SWEEP
+      right:
+        type: pull
+        cooldown: 6.0
+        params:
+          display: '丝线拉拽'
+          mode: auto
+          range: 12.0
+          power: 0.55
+          duration: 0.4
+          angle: 45
+          damage: 1.0
+          particle: END_ROD
+          sound: ITEM_TRIDENT_RETURN
+      shift-right:
+        type: shockwave
+        cooldown: 13.0
+        params:
+          display: '丝网束缚'
+          damage: 6.0
+          radius: 3.6
+          knockback: 0.15
+          launch: 0.1
+          min-falloff: 0.7
+          slow-duration: 90
+          slow-amplifier: 2
+          particle: END_ROD
+          sound: BLOCK_GLASS_BREAK
+      q:
+        type: mode_switch
+        cooldown: 0
+        params: { }
