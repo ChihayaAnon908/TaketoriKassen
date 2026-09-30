@@ -3,6 +3,7 @@ package com.taketori.kassen.paper.match;
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.match.MatchRules;
 import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.paper.match.room.GameRoom;
 import com.taketori.kassen.paper.skill.SkillManager;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
@@ -26,6 +27,8 @@ import java.util.Set;
  */
 public final class BaseCaptureManager {
 
+    /** 所属房间：阶段/规则/场地/队伍/计分/播报全部按房间取。 */
+    private final GameRoom room;
     private final TaketoriPlugin plugin;
     /** key = 基地归属方 + 编号，例如 "red:3"。 */
     private final Map<String, Double> progress = new HashMap<>();
@@ -34,8 +37,9 @@ public final class BaseCaptureManager {
     /** 下一次"保护期剩余时间"提示的阈值（已过秒数），用阈值而非取模，卡顿跳秒也不会漏提示。 */
     private long nextNoticeAt;
 
-    public BaseCaptureManager(TaketoriPlugin plugin) {
-        this.plugin = plugin;
+    public BaseCaptureManager(GameRoom room) {
+        this.room = room;
+        this.plugin = room.plugin();
     }
 
     public void start() {
@@ -65,7 +69,7 @@ public final class BaseCaptureManager {
     public int capturedCount(TeamId owner) {
         // 遍历该队"实际配置了"的编号：这样 base.count-per-team 写成任意值或 auto 都能正确统计
         int count = 0;
-        for (int index : plugin.arena().bases(owner).keySet()) {
+        for (int index : room.arena().bases(owner).keySet()) {
             if (isCaptured(owner, index)) {
                 count++;
             }
@@ -78,19 +82,19 @@ public final class BaseCaptureManager {
     }
 
     private void tick() {
-        if (!plugin.match().isRunning()) {
+        if (!room.isRunning()) {
             return;
         }
         // 开局保护期：前 N 秒完全不推进占点进度（也不衰减）
-        if (!plugin.match().isBaseCaptureOpen()) {
-            long remaining = plugin.match().baseCaptureDelayRemaining();
-            long elapsed = plugin.match().elapsedSeconds();
+        if (!room.isBaseCaptureOpen()) {
+            long remaining = room.baseCaptureDelayRemaining();
+            long elapsed = room.elapsedSeconds();
             if (remaining > 0L && elapsed >= nextNoticeAt) {
                 nextNoticeAt = elapsed + 10L;
                 for (TeamId team : TeamId.values()) {
-                    for (Player player : plugin.match().teamPlayers(team)) {
+                    for (Player player : room.teamPlayers(team)) {
                         if (!plugin.spectator().isSpectator(player)) {
-                            plugin.matchBoard().actionBar(player,
+                            room.scoreboard().actionBar(player,
                                     "<gray>基地保护期：<white>" + remaining + "</white> 秒后开放占点");
                         }
                     }
@@ -98,11 +102,11 @@ public final class BaseCaptureManager {
             }
             return;
         }
-        MatchRules rules = plugin.match().rules();
+        MatchRules rules = room.rules();
         for (TeamId owner : TeamId.values()) {
             // 只遍历实际配置的基地（base.count-per-team 可写任意数量或 auto）
-            for (int index : plugin.arena().bases(owner).keySet()) {
-                CuboidRegion region = plugin.arena().base(owner, index);
+            for (int index : room.arena().bases(owner).keySet()) {
+                CuboidRegion region = room.arena().base(owner, index);
                 if (region == null) {
                     continue;
                 }
@@ -125,7 +129,7 @@ public final class BaseCaptureManager {
                     int percent = (int) Math.round(current / rules.baseCaptureSeconds() * 100.0D);
                     String bar = SkillManager.progressBar(current, rules.baseCaptureSeconds());
                     for (Player attacker : attackers) {
-                        plugin.matchBoard().actionBar(attacker, "<red>拆除 " + owner.display()
+                        room.scoreboard().actionBar(attacker, "<red>拆除 " + owner.display()
                                 + " 基地 #" + index + "</red> <gray>" + bar + " <white>" + percent + "%");
                     }
                 }
@@ -133,7 +137,7 @@ public final class BaseCaptureManager {
                 if (current >= rules.baseCaptureSeconds() && rules.baseCaptureSeconds() > 0.0D) {
                     captured.add(key);
                     Player scorer = attackers.isEmpty() ? null : attackers.get(0);
-                    plugin.match().addScore(scorer,
+                    room.addScore(scorer,
                             scorer == null ? 0 : rules.baseCaptureScore(),
                             "拆除 " + owner.display() + " 基地 #" + index);
                     if (scorer != null) {
@@ -141,7 +145,7 @@ public final class BaseCaptureManager {
                         plugin.stats().add(scorer.getName(), StatsTracker.Stat.BASE_CAPTURES, 1L);
                     }
                     // 上面若 scorer 为 null 则不计分（理论不会发生：进度只由在场玩家推进）
-                    plugin.match().broadcast("<yellow>⚑ " + owner.display() + " 的基地 #" + index
+                    room.broadcast("<yellow>⚑ " + owner.display() + " 的基地 #" + index
                             + " 被 <white>" + (scorer == null ? "敌方" : scorer.getName()) + "</white> 拆除！"
                             + " <gray>(+" + rules.baseCaptureScore() + " 分)");
                     if (plugin.config().debug()) {
@@ -156,7 +160,7 @@ public final class BaseCaptureManager {
     private List<Player> enemiesInside(TeamId owner, CuboidRegion region) {
         List<Player> result = new java.util.ArrayList<>();
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            TeamId team = plugin.match().teamOf(player.getUniqueId());
+            TeamId team = room.teamOf(player.getUniqueId());
             if (team == null || team == owner) {
                 continue;
             }

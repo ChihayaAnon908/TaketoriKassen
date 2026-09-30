@@ -64,20 +64,37 @@ public final class LobbyListener implements Listener {
         }
 
         switch (action) {
+            // ---- 直接执行的匹配动作：点牌即走，不经过菜单 ----
+            case JOIN -> plugin.lobby().quickJoin(player);
+            case LEAVE -> leaveViaSign(player);
             // ---- 指向界面：告示牌只负责把入口指到 GUI ----
-            case JOIN, LEAVE, SPECTATE, LOBBY, MENU -> openMenuFor(player, action);
+            case SPECTATE, LOBBY, MENU -> openMenuFor(player, action);
+            case ROOMS -> plugin.roomListMenu().open(player);
             case CHARACTER -> plugin.characterMenu().open(player);
             case RANKS -> plugin.statsMenu().open(player);
             default -> player.sendMessage(MINI.deserialize("<red>暂不支持的告示牌动作：<white>" + action.key()));
         }
     }
 
+    /**
+     * leave 告示牌：观众先退观众；否则走与 {@code /taketori leave} 相同的
+     * LobbyManager.returnToLobby（等待区退房回大厅 / 对局中拒绝，文案统一）。
+     */
+    private void leaveViaSign(Player player) {
+        if (plugin.spectator().leaveAudience(player)) {
+            return;
+        }
+        if (plugin.spectator().isSpectator(player)) {
+            player.sendMessage(MINI.deserialize("<gray>你正在等待复活（阵亡旁观），稍后会自动回到战场，不需要退出。"));
+            return;
+        }
+        plugin.lobby().returnToLobby(player);
+    }
+
     /** 打开玩家菜单，并用 actionBar 告诉玩家该点哪个按钮。 */
     private void openMenuFor(Player player, LobbyAction action) {
         plugin.playerMenu().open(player);
         String hint = switch (action) {
-            case JOIN -> "点「加入对局（匹配）」加入队列";
-            case LEAVE -> "点「加入对局（匹配）」可以退出队列";
             case SPECTATE -> "点「旁观 / 退出观战」进入观众";
             case LOBBY -> "点「回大厅」传送回大厅";
             default -> "在菜单里选择要做的操作";

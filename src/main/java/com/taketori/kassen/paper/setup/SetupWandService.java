@@ -2,6 +2,7 @@ package com.taketori.kassen.paper.setup;
 
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.paper.match.ArenaDef;
 import com.taketori.kassen.paper.match.ArenaManager;
 import com.taketori.kassen.paper.match.CuboidRegion;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -87,7 +88,7 @@ public final class SetupWandService {
     public void clear(Player player) {
         plugin.arena().clearSelection(player.getUniqueId());
         plugin.fx().sound("BLOCK_ANVIL_LAND", player, 0.4F, 1.8F);
-        plugin.matchBoard().actionBar(player, "<gray>选区已清空");
+        player.sendActionBar(MINI.deserialize("<gray>选区已清空"));
         say(player, "<gray>选区已清空（左键点方块重新开始）。");
     }
 
@@ -97,9 +98,9 @@ public final class SetupWandService {
     }
 
     private void mark(Player player, String node, Location location) {
-        plugin.matchBoard().actionBar(player, "<green>" + node + " <white>" + format(location));
+        player.sendActionBar(MINI.deserialize("<green>" + node + " <white>" + format(location)));
         say(player, "<green>" + node + " 已设置：<white>" + format(location));
-        String existing = locate(location);
+        String existing = locate(player.getUniqueId(), location);
         if (existing != null) {
             say(player, "<yellow>注意：这个位置已经在 <white>" + existing + "</white> 的范围内。");
         }
@@ -133,9 +134,15 @@ public final class SetupWandService {
 
     // ---------------------------------------------------------------- 位置判定
 
-    /** 该位置是否已经落在某个已配置的区域里（防止把基地划到刷怪区上）。 */
-    private String locate(Location location) {
-        ArenaManager arena = plugin.arena();
+    /**
+     * 该位置是否已经落在某个已配置的区域里（防止把基地划到刷怪区上）。
+     * 多房间版：只检查管理员当前选中的场地；没选中场地时不做重叠提示。
+     */
+    private String locate(UUID admin, Location location) {
+        ArenaDef arena = plugin.arena().selected(admin);
+        if (arena == null) {
+            return null;
+        }
         if (arena.minionRegion() != null && arena.minionRegion().contains(location)) {
             return "小怪刷新区";
         }

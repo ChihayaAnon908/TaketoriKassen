@@ -19,7 +19,7 @@ import java.util.logging.Level;
  * 跨局累计统计（<code>data/stats.yml</code>）：总积分、对局数、胜场、击杀、月人击杀、拆家、死亡、单局最高分。
  *
  * <p>所有数值都是跨局累加、服务器重启后保留，是总计排行榜（{@link StatsMenu}）的数据来源。
- * 单局内的得分王由 {@link MatchManager} 在结算时播报，两者互不影响。</p>
+ * 单局内的得分王由各 {@link com.taketori.kassen.paper.match.room.GameRoom} 在结算时播报，两者互不影响。</p>
  *
  * <p>键名保持向后兼容：老版本只有 <code>total-score</code> / <code>matches</code> /
  * <code>wins</code> / <code>best-score</code>，新键缺失时按 0 读入，不会报错。</p>
@@ -193,7 +193,7 @@ public final class StatsTracker {
         save();
     }
 
-    /** 记录胜场（需要队伍成员名单，由 MatchManager 在结算时调用）。 */
+    /** 记录胜场（需要队伍成员名单，由 GameRoom 在结算时调用）。 */
     public void recordWin(List<String> winners) {
         for (String name : winners) {
             entries.computeIfAbsent(name, key -> new Entry()).add(Stat.WINS, 1L);

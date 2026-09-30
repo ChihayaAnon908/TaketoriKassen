@@ -1,0 +1,1539 @@
+package com.taketori.kassen.paper.match.room;
+
+import com.taketori.kassen.TaketoriPlugin;
+import com.taketori.kassen.core.match.MatchRules;
+import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.core.worlds.WorldScope;
+import com.taketori.kassen.paper.match.ArenaDef;
+import com.taketori.kassen.paper.match.BaseCaptureManager;
+import com.taketori.kassen.paper.match.CuboidRegion;
+import com.taketori.kassen.paper.match.LootSpawner;
+import com.taketori.kassen.paper.match.MatchScoreboard;
+import com.taketori.kassen.paper.match.MinionSpawner;
+import com.taketori.kassen.paper.match.OutpostManager;
+import com.taketori.kassen.paper.item.PDCKeys;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.entity.Item;
+import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.scheduler.BukkitTask;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
+
+/**
+ * 游戏房间：一个启用场地对应一个房间，可反复开局、多房间并发互不干扰。
+ *
+ * <p>生命周期：{@code WAITING（等待加入）→ STARTING（倒计时）→ CAGED（进笼冻结）
+ * → PLAYING（战斗）→ ENDING（结算）→ WAITING}：人数达 waiting.min-players 开始倒计时，
+ * 满员切短倒计时、掉人取消；开局瞬间均衡分队并传送进出生点玻璃笼，笼解除后正式开战；
+ * 胜负后 ENDING 延迟 end-delay 秒回大厅并重置复用。本类聚合从 MatchManager 迁入的
+ * <b>队伍、比分、击杀、角色裁决、胜负判定、播报</b>等单局状态与逻辑，以及该房间自有的
+ * 刷怪/占点/据点/道具/记分板组件。</p>
+ *
+ * <p>注意：玩家"属于哪个房间"的唯一权威映射在 {@link RoomManager}；本类的
+ * {@link #waiting} 与 {@link #teams} 只是参与者名单。WAITING/STARTING 期间玩家中立无队伍，
+ * 开局瞬间才均衡分队。</p>
+ */
+public final class GameRoom {
+
+    /** 房间阶段。 */
+    public enum Phase {
+        /** 等待玩家加入。 */
+        WAITING,
+        /** 人数达标，倒计时中。 */
+        STARTING,
+        /** 已分队传送进出生点玻璃笼，短暂无敌冻结。 */
+        CAGED,
+        /** 正式战斗。 */
+        PLAYING,
+        /** 胜负已分，结算收尾中。 */
+        ENDING
+    }
+
+    private static final MiniMessage MINI = MiniMessage.miniMessage();
+
+    private final TaketoriPlugin plugin;
+    private final RoomManager manager;
+    private final ArenaDef arena;
+    /** 创建序号：快速加入平局时优先先创建的房间。 */
+    private final long order;
+
+    private Phase phase = Phase.WAITING;
+    /** 房间模式（每房独立，不再写回全局 config）。 */
+    private boolean pve;
+    private MatchRules rules = MatchRules.defaults();
+
+    /** WAITING/STARTING 阶段的中立等待者（开局分队后清空，参与者转由 teams 记录）。 */
+    private final Set<UUID> waiting = ConcurrentHashMap.newKeySet();
+
+    private final Map<TeamId, Integer> teamScores = new EnumMap<>(TeamId.class);
+    private final Map<UUID, Integer> playerScores = new HashMap<>();
+    private final Map<UUID, String> playerNames = new HashMap<>();
+    private final Map<UUID, TeamId> teams = new HashMap<>();
+    /** 本局每个玩家的击杀数：玩家与月人分开记，记分板显示两者合计。 */
+    private final Map<UUID, Integer> playerKills = new HashMap<>();
+    private final Map<UUID, Integer> minionKills = new HashMap<>();
+
+    private long startedAt;
+    private long endedAt;
+    private TeamId winner;
+
+    private UUID lastScorer;
+    private String lastScoreReason = "-";
+    private int lastScoreAmount;
+
+    // ---- 房间自有组件（Task 5 起构造注入本房间，替换全局单例）----
+    private final MinionSpawner minions;
+    private final BaseCaptureManager baseCapture;
+    private final OutpostManager outpost;
+    private final LootSpawner loot;
+    private final MatchScoreboard board;
+    /** 出生点玻璃笼（每局重建/还原）。 */
+    private final CageBuilder cage = new CageBuilder(this);
+    /** 对局区域四周屏障墙（每局重建/还原）。 */
+    private final BarrierBuilder barrier = new BarrierBuilder(this);
+
+    // ---- 开局背包备份：开局清掉玩家自带物品，结算返还 ----
+    private final Map<UUID, org.bukkit.inventory.ItemStack[]> backupContents = new HashMap<>();
+    private final Map<UUID, org.bukkit.inventory.ItemStack[]> backupArmor = new HashMap<>();
+    private final Map<UUID, org.bukkit.inventory.ItemStack> backupOffhand = new HashMap<>();
+
+    // ---- 倒计时 / 笼子 / 结算的定时状态 ----
+    /** STARTING 倒计时起点（毫秒）。 */
+    private long countdownStart;
+    /** STARTING 当前剩余总时长（毫秒，满员时缩短）。 */
+    private long countdownMillis;
+    /** 满员短倒计时毫秒（0 = 满员立即开局）。 */
+    private long countdownFullMillis;
+    /** 是否已切过满员短倒计时（只播报一次）。 */
+    private boolean countdownFull;
+    /** CAGED 解除任务句柄。 */
+    private BukkitTask cageTask;
+    /** ENDING 延迟收尾任务句柄。 */
+    private BukkitTask endTask;
+
+    GameRoom(TaketoriPlugin plugin, RoomManager manager, ArenaDef arena, long order) {
+        this.plugin = plugin;
+        this.manager = manager;
+        this.arena = arena;
+        this.order = order;
+        this.pve = "pve".equalsIgnoreCase(plugin.getConfig().getString("match.mode", "pvp"));
+        this.minions = new MinionSpawner(this);
+        this.baseCapture = new BaseCaptureManager(this);
+        this.outpost = new OutpostManager(this);
+        this.loot = new LootSpawner(this);
+        this.loot.load();
+        this.board = new MatchScoreboard(this);
+        loadRules();
+        resetScores();
+    }
+
+    // ---------------------------------------------------------------- 基本信息
+
+    public TaketoriPlugin plugin() {
+        return plugin;
+    }
+
+    public ArenaDef arena() {
+        return arena;
+    }
+
+    /** 房间 id 与场地 id 相同。 */
+    public String id() {
+        return arena.id();
+    }
+
+    public String display() {
+        return arena.display();
+    }
+
+    public long order() {
+        return order;
+    }
+
+    public Phase phase() {
+        return phase;
+    }
+
+    /** 是否处于正式战斗阶段（组件 tick / 计分判定用）。 */
+    public boolean isRunning() {
+        return phase == Phase.PLAYING;
+    }
+
+    // ---------------------------------------------------------------- 规则与模式
+
+    /**
+     * 从 config.yml 读取对局规则作为本房间快照；模式取本房间自己的 pve 标志。
+     * 插件启用、reload 重建房间、管理员切模式时调用。
+     */
+    public void loadRules() {
+        var cfg = plugin.getConfig();
+        // 月人刷新节奏：arenas.yml 的 minion-spawn（场地级）优先，未配置回落 config.yml 的 minion.* 全局默认
+        rules = new MatchRules(
+                cfg.getInt("match.score-to-win", 600),
+                Math.max(1, cfg.getInt("match.time-limit-minutes", 20)) * 60,
+                Math.max(0, cfg.getInt("match.respawn-delay-seconds", 5)),
+                cfg.getInt("scoring.minion-kill", 3),
+                cfg.getInt("scoring.player-kill", 10),
+                cfg.getInt("scoring.base-capture", 50),
+                Math.max(1, cfg.getInt("minion.health", 40)),
+                cfg.getBoolean("minion.iron-armor", true),
+                arena.minionSpawnIntervalSeconds(Math.max(1, cfg.getInt("minion.interval-seconds", 9))),
+                arena.minionSpawnPerSpawn(Math.max(1, cfg.getInt("minion.per-spawn", 3))),
+                arena.minionSpawnMaxAlive(Math.max(1, cfg.getInt("minion.max-alive", 15))),
+                Math.max(0.1D, cfg.getDouble("base.capture-seconds", 10.0D)),
+                Math.max(0.0D, cfg.getDouble("base.capture-delay-seconds", 60.0D)),
+                Math.max(0.0D, cfg.getDouble("base.decay-per-second", 0.5D)),
+                cfg.getBoolean("base.multi-player-bonus", true),
+                cfg.getBoolean("match.keep-inventory", true),
+                Math.max(0.0D, cfg.getDouble("combat.kill-heal", 6.0D)),
+                Math.max(0.0D, cfg.getDouble("combat.minion-kill-heal", 0.0D)),
+                pve,
+                cfg.getString("combat.friendly-fire-protection", "auto"));
+    }
+
+    public MatchRules rules() {
+        return rules;
+    }
+
+    /** 当前是不是 PVE 模式（所有人一队打月人：玩家之间无伤害、不做基地占点）。 */
+    public boolean isPve() {
+        return pve;
+    }
+
+    /**
+     * 友伤保护是否生效（同一队的玩家互相不造成伤害）。
+     * auto（默认）：PVP 开启、PVE 关闭；on：两种模式都保护；off：都不保护。
+     */
+    public boolean isFriendlyFireProtected() {
+        String policy = rules().friendlyFire() == null
+                ? "auto" : rules().friendlyFire().trim().toLowerCase(Locale.ROOT);
+        return switch (policy) {
+            case "on", "true", "always", "yes" -> true;
+            case "off", "false", "never", "no" -> false;
+            default -> !isPve();
+        };
+    }
+
+    /**
+     * 切换本房间 PVP / PVE（只影响本房间的规则快照，不写全局 config）。
+     * 仅 WAITING 阶段允许切换。
+     *
+     * @return 失败原因；成功返回 null
+     */
+    public String setMode(String mode) {
+        if (phase != Phase.WAITING) {
+            return "房间已经开始，不能切换模式。";
+        }
+        this.pve = "pve".equalsIgnoreCase(mode);
+        loadRules();
+        return null;
+    }
+
+    // ---------------------------------------------------------------- 等待者与容量
+
+    /** 把玩家加入等待名单（玩家→房间的映射由 RoomManager 维护）。 */
+    public boolean addWaiting(Player player) {
+        if (player == null) {
+            return false;
+        }
+        boolean added = waiting.add(player.getUniqueId());
+        if (added) {
+            playerNames.put(player.getUniqueId(), player.getName());
+            playerScores.putIfAbsent(player.getUniqueId(), 0);
+        }
+        return added;
+    }
+
+    public void removeWaiting(UUID uuid) {
+        if (uuid != null) {
+            waiting.remove(uuid);
+        }
+    }
+
+    public Set<UUID> waitingView() {
+        return Set.copyOf(waiting);
+    }
+
+    /** 在线的等待者（掉线者不计入人数与倒计时）。 */
+    public List<Player> waitingPlayers() {
+        List<Player> result = new ArrayList<>();
+        for (UUID uuid : waiting) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null && player.isOnline()) {
+                result.add(player);
+            }
+        }
+        return result;
+    }
+
+    /** 在线等待人数（倒计时判定用）。 */
+    public int waitingCount() {
+        return waitingPlayers().size();
+    }
+
+    /** 每队人数上限。 */
+    public int teamSizeCap() {
+        return Math.max(1, plugin.config().matchTeamSize());
+    }
+
+    /** 房间满员人数：PVP=每队上限×2；PVE 取 waiting.pve-full-players。 */
+    public int maxPlayers() {
+        return isPve() ? Math.max(1, plugin.config().waitingPveFullPlayers()) : teamSizeCap() * 2;
+    }
+
+    /** 房间当前是否可被匹配加入（等待/倒计时且未满）。 */
+    public boolean isJoinable() {
+        return (phase == Phase.WAITING || phase == Phase.STARTING)
+                && waitingCount() < maxPlayers();
+    }
+
+    /** 房间内所有在线参与者（等待者 + 已分队玩家），空房自动停止判定用。 */
+    public int onlineParticipantCount() {
+        Set<UUID> all = new LinkedHashSet<>(waiting);
+        all.addAll(teams.keySet());
+        int count = 0;
+        for (UUID uuid : all) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null && player.isOnline()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    // ---------------------------------------------------------------- 队伍
+
+    public TeamId teamOf(UUID uuid) {
+        return teams.get(uuid);
+    }
+
+    /** 开局分队时调用：登记队伍、名字、记分板。 */
+    public void join(Player player, TeamId team) {
+        teams.put(player.getUniqueId(), team);
+        playerNames.put(player.getUniqueId(), player.getName());
+        playerScores.putIfAbsent(player.getUniqueId(), 0);
+        board.showTo(player);
+    }
+
+    public void leave(UUID uuid) {
+        teams.remove(uuid);
+        Player player = Bukkit.getPlayer(uuid);
+        if (player != null) {
+            board.hide(player);
+            // 对局中被移出（管理员 team none 等）：把开局前备份的背包还回去
+            restoreInventoryIfAny(player);
+        }
+    }
+
+    /**
+     * 玩家自助选择队伍（大厅 GUI 的「队伍选择」）。
+     * 战斗中不允许换边；PVE 全部并到红队；PVP 队伍满员会被拒绝。
+     *
+     * @return 失败原因；成功返回 null
+     */
+    public String chooseTeam(Player player, TeamId team) {
+        if (player == null || team == null) {
+            return "队伍无效。";
+        }
+        if (phase == Phase.PLAYING || phase == Phase.CAGED) {
+            return "对局进行中不能换队（观战请点「旁观」）。";
+        }
+        if (isPve()) {
+            join(player, TeamId.RED);
+            return null;
+        }
+        int maxPerTeam = teamSizeCap();
+        boolean sameTeam = teams.get(player.getUniqueId()) == team;
+        if (!sameTeam && teamPlayers(team).size() >= maxPerTeam) {
+            return team.display() + " 已满（每队上限 " + maxPerTeam + " 人）。";
+        }
+        join(player, team);
+        return null;
+    }
+
+    public List<Player> teamPlayers(TeamId team) {
+        List<Player> result = new ArrayList<>();
+        for (Map.Entry<UUID, TeamId> entry : teams.entrySet()) {
+            if (entry.getValue() != team) {
+                continue;
+            }
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player != null && player.isOnline()) {
+                result.add(player);
+            }
+        }
+        return result;
+    }
+
+    public Map<UUID, TeamId> teamsView() {
+        return Map.copyOf(teams);
+    }
+
+    public void clearTeams() {
+        teams.clear();
+        playerNames.clear();
+    }
+
+    // ---------------------------------------------------------------- 本局击杀计数
+
+    /** 记录一次玩家击杀（本局记分板与结算用；跨局统计由事件层写入）。 */
+    public void addPlayerKill(Player killer) {
+        if (killer == null) {
+            return;
+        }
+        playerKills.merge(killer.getUniqueId(), 1, Integer::sum);
+        playerNames.put(killer.getUniqueId(), killer.getName());
+    }
+
+    /** 记录一次月人击杀。 */
+    public void addMinionKill(Player killer) {
+        if (killer == null) {
+            return;
+        }
+        minionKills.merge(killer.getUniqueId(), 1, Integer::sum);
+        playerNames.put(killer.getUniqueId(), killer.getName());
+    }
+
+    public int playerKillsOf(UUID uuid) {
+        return playerKills.getOrDefault(uuid, 0);
+    }
+
+    public int minionKillsOf(UUID uuid) {
+        return minionKills.getOrDefault(uuid, 0);
+    }
+
+    /** 本局击杀总计（玩家 + 月人），记分板显示的就是它。 */
+    public int totalKillsOf(UUID uuid) {
+        return playerKillsOf(uuid) + minionKillsOf(uuid);
+    }
+
+    /** 本局全队击杀总计（PVE 记分板用）。 */
+    public int teamTotalKills(TeamId team) {
+        int total = 0;
+        for (Map.Entry<UUID, TeamId> entry : teams.entrySet()) {
+            if (entry.getValue() == team) {
+                total += totalKillsOf(entry.getKey());
+            }
+        }
+        return total;
+    }
+
+    // ---------------------------------------------------------------- 角色分配（同队唯一 + 权重裁决）
+
+    /** 角色分配结果。 */
+    public record RoleDecision(boolean granted, String displaced, String reason) {
+
+        public boolean displacedSomeone() {
+            return displaced != null;
+        }
+    }
+
+    /** 玩家的隐性标签权重（未设置标签按 0）。 */
+    public int weightOf(UUID uuid) {
+        var profile = plugin.config().characters().profileOrNull(uuid);
+        String tag = profile == null ? null : profile.tag();
+        return plugin.tags().weightOf(tag);
+    }
+
+    /**
+     * 请求把某个角色分配给玩家。作用域仅限本房间。
+     *
+     * <p>同一个队伍里不允许出现相同角色（不同队伍之间可以），冲突时按隐性标签权重裁决：
+     * 权重高者拿到角色，权重低者被拒绝；权重相同则先到先得。玩家还没分队时直接放行，
+     * 等分队或开局时再统一裁决。</p>
+     */
+    public RoleDecision requestRole(Player player, String characterId) {
+        if (player == null || characterId == null || characterId.isBlank()) {
+            return new RoleDecision(false, null, "参数无效。");
+        }
+        TeamId team = teams.get(player.getUniqueId());
+        if (team == null) {
+            return new RoleDecision(true, null, null);
+        }
+        UUID holder = holderOf(team, characterId, player.getUniqueId());
+        if (holder == null) {
+            return new RoleDecision(true, null, null);
+        }
+        int mine = weightOf(player.getUniqueId());
+        int theirs = weightOf(holder);
+        String holderName = nameOf(holder);
+        if (mine > theirs) {
+            // 顶替：解除对方的角色（他需要重新选一个）
+            Player holderPlayer = Bukkit.getPlayer(holder);
+            if (holderPlayer != null) {
+                plugin.bindCharacter(holderPlayer, null);
+            } else {
+                plugin.config().characters().unbind(holder);
+                plugin.dataStore().setCharacterId(holder, null);
+            }
+            broadcast("<yellow>" + nameOf(player.getUniqueId()) + " 接管了 " + team.display()
+                    + " 的 " + characterId + "：" + holderName + " 的隐性标签权重较低，角色已被解除。");
+            return new RoleDecision(true, holderName, null);
+        }
+        return new RoleDecision(false, null, team.display() + " 已经有该角色（由 " + holderName
+                + " 占用，权重 " + theirs + " ≥ 你的 " + mine + "）。");
+    }
+
+    /** 开局前的最终裁决：每队同一角色只保留权重最高的那个（其余解除角色待重选）。 */
+    public void enforceUniqueRoles() {
+        Map<String, UUID> taken = new HashMap<>();
+        for (Map.Entry<UUID, TeamId> entry : new ArrayList<>(teams.entrySet())) {
+            var profile = plugin.config().characters().profileOrNull(entry.getKey());
+            if (profile == null || !profile.hasCharacter()) {
+                continue;
+            }
+            String key = entry.getValue().key() + ":" + profile.characterId();
+            UUID holder = taken.get(key);
+            if (holder == null) {
+                taken.put(key, entry.getKey());
+                continue;
+            }
+            UUID keeper = weightOf(entry.getKey()) > weightOf(holder) ? entry.getKey() : holder;
+            UUID loser = keeper.equals(holder) ? entry.getKey() : holder;
+            taken.put(key, keeper);
+            Player loserPlayer = Bukkit.getPlayer(loser);
+            if (loserPlayer != null) {
+                plugin.bindCharacter(loserPlayer, null);
+            } else {
+                plugin.config().characters().unbind(loser);
+                plugin.dataStore().setCharacterId(loser, null);
+            }
+            broadcast("<yellow>" + nameOf(loser) + " 的角色被解除："
+                    + entry.getValue().display() + " 不允许出现两个相同角色（权重更高者优先）。");
+        }
+    }
+
+    /** 该队里已经占用某角色的玩家（可排除自己）。 */
+    private UUID holderOf(TeamId team, String characterId, UUID exclude) {
+        for (Map.Entry<UUID, TeamId> entry : teams.entrySet()) {
+            if (entry.getValue() != team || entry.getKey().equals(exclude)) {
+                continue;
+            }
+            var profile = plugin.config().characters().profileOrNull(entry.getKey());
+            if (profile != null && characterId.equals(profile.characterId())) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 出生增益：开局与复活共用，持续秒数与效果都来自 config.yml 的 combat.spawn-buff。
+     * 配置写 0 秒或清空 effects 即为关闭；效果名解析失败会跳过（不报错）。
+     */
+    public void applySpawnBuff(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        int seconds = plugin.config().spawnBuffSeconds();
+        if (seconds <= 0) {
+            return;
+        }
+        int ticks = seconds * 20;
+        for (Map<?, ?> raw : plugin.config().spawnBuffEffects()) {
+            Object typeName = raw.get("type");
+            if (typeName == null) {
+                continue;
+            }
+            var type = plugin.versions().potionEffect(String.valueOf(typeName));
+            if (type == null) {
+                if (plugin.config().debug()) {
+                    plugin.getLogger().info("[room] 出生增益的名字无法解析：" + typeName);
+                }
+                continue;
+            }
+            int amplifier = raw.get("amplifier") instanceof Number number ? number.intValue() : 0;
+            player.addPotionEffect(new org.bukkit.potion.PotionEffect(type, ticks,
+                    Math.max(0, amplifier), false, true, true));
+        }
+    }
+
+    /** 死亡旁观的观察点：优先看中央刷怪区。 */
+    public Location spectatorViewPoint() {
+        CuboidRegion region = arena.minionRegion();
+        return region == null ? null : region.center();
+    }
+
+    // ---------------------------------------------------------------- 计分
+
+    private void resetScores() {
+        teamScores.clear();
+        for (TeamId team : TeamId.values()) {
+            teamScores.put(team, 0);
+        }
+        playerScores.clear();
+        playerKills.clear();
+        minionKills.clear();
+        lastScorer = null;
+        lastScoreReason = "-";
+        lastScoreAmount = 0;
+        winner = null;
+    }
+
+    public int teamScore(TeamId team) {
+        return teamScores.getOrDefault(team, 0);
+    }
+
+    public int playerScore(UUID uuid) {
+        return playerScores.getOrDefault(uuid, 0);
+    }
+
+    public UUID lastScorer() {
+        return lastScorer;
+    }
+
+    public String lastScoreReason() {
+        return lastScoreReason;
+    }
+
+    public int lastScoreAmount() {
+        return lastScoreAmount;
+    }
+
+    /** 给玩家记分（同时计入其队伍）。只在 PLAYING 阶段生效。 */
+    public void addScore(Player player, int amount, String reason) {
+        if (player == null || amount == 0) {
+            return;
+        }
+        // 观众不计分
+        if (plugin.spectator().isSpectator(player)) {
+            return;
+        }
+        TeamId team = teams.get(player.getUniqueId());
+        if (team == null) {
+            return;
+        }
+        addScore(team, player.getUniqueId(), player.getName(), amount, reason);
+    }
+
+    public void addScore(TeamId team, UUID scorer, String scorerName, int amount, String reason) {
+        if (phase != Phase.PLAYING || team == null) {
+            return;
+        }
+        teamScores.merge(team, amount, Integer::sum);
+        if (scorer != null) {
+            playerScores.merge(scorer, amount, Integer::sum);
+            playerNames.put(scorer, scorerName == null ? "?" : scorerName);
+            lastScorer = scorer;
+            lastScoreReason = reason;
+            lastScoreAmount = amount;
+        }
+        if (plugin.config().debug()) {
+            plugin.getLogger().info(String.format("[room %s] %s +%d（%s）→ 总分 %d:%d",
+                    id(), team.display(), amount, reason, teamScore(TeamId.RED), teamScore(TeamId.BLUE)));
+        }
+        board.updateAll();
+        if (teamScore(team) >= rules().scoreToWin()) {
+            finish(team);
+        }
+    }
+
+    /** 本局得分最高的玩家（用于结算播报）。 */
+    public Map.Entry<UUID, Integer> topScorer() {
+        return playerScores.entrySet().stream()
+                .filter(entry -> entry.getValue() > 0)
+                .max(Comparator.comparingInt(Map.Entry::getValue))
+                .orElse(null);
+    }
+
+    public String nameOf(UUID uuid) {
+        if (uuid == null) {
+            return "-";
+        }
+        String name = playerNames.get(uuid);
+        if (name != null) {
+            return name;
+        }
+        Player player = Bukkit.getPlayer(uuid);
+        return player != null ? player.getName() : uuid.toString().substring(0, 8);
+    }
+
+    // ---------------------------------------------------------------- 生命周期
+
+    /**
+     * 倒计时归零后开局：锁定在线等待者名单 → PVE 全红 / PVP 均衡随机分队（差 ≤1）
+     * → 角色裁决 → 传送出生点 / 记分板 / 出生增益 → 建玻璃笼进 CAGED（无敌冻结）
+     * → 到时笼解除进 PLAYING 并启动该房间刷怪/道具/占点(PVP)/据点(PVE) → 播报。
+     *
+     * <p>{@code waiting.cage-hold-seconds=0}（或出生点异常导致建笼 0 格）时跳过 CAGED 直接开战。</p>
+     *
+     * @param force true = 强制开局：PVP 允许某一队暂时无人
+     * @return 失败原因；成功返回 null
+     */
+    public String beginMatch(boolean force) {
+        if (phase == Phase.PLAYING || phase == Phase.CAGED) {
+            return "房间已经在对局中。";
+        }
+        if (!arena.isReady()) {
+            return "场地未就绪，还缺：" + arena.missingHint();
+        }
+        // 锁定名单：只取在线等待者；PVE 全红，PVP 均衡随机分队（人数差 ≤1）
+        List<Player> roster = waitingPlayers();
+        if (roster.isEmpty()) {
+            return "房间里一个人都没有。";
+        }
+        // 开局瞬间统一分队：等待期的临时选边/管理指派全部丢弃，按锁定名单均衡重分
+        teams.clear();
+        if (isPve()) {
+            for (Player player : roster) {
+                join(player, TeamId.RED);
+            }
+        } else {
+            roster = new ArrayList<>(roster);
+            java.util.Collections.shuffle(roster);
+            int maxPerTeam = teamSizeCap();
+            int red = 0;
+            int blue = 0;
+            for (Player player : roster) {
+                TeamId team;
+                if (red >= maxPerTeam) {
+                    team = TeamId.BLUE;
+                } else if (blue >= maxPerTeam) {
+                    team = TeamId.RED;
+                } else if (red < blue) {
+                    team = TeamId.RED;
+                } else if (blue < red) {
+                    team = TeamId.BLUE;
+                } else {
+                    team = ThreadLocalRandom.current().nextBoolean() ? TeamId.RED : TeamId.BLUE;
+                }
+                join(player, team);
+                if (team == TeamId.RED) {
+                    red++;
+                } else {
+                    blue++;
+                }
+            }
+        }
+        waiting.clear();
+
+        boolean red = !teamPlayers(TeamId.RED).isEmpty();
+        boolean blue = !teamPlayers(TeamId.BLUE).isEmpty();
+        if (!isPve() && (!red || !blue) && !force) {
+            // 分队没成（理论上均衡分队不会出现）：解散名单，把锁定的等待者退回等待区
+            teams.clear();
+            for (Player player : roster) {
+                waiting.add(player.getUniqueId());
+            }
+            return "双方都需要至少一名玩家（人数不够也想开：/taketori match force）。";
+        }
+
+        resetScores();
+        endedAt = 0L;
+
+        // 开局前最终裁决：每队同一角色只保留权重最高的那个（不同队伍之间不受影响）
+        enforceUniqueRoles();
+
+        // 开局时只清掉本房参赛者的旁观残留（例如带着别的房间的观众身份进了等待区），
+        // 不能用全局 clearAll —— 那会把正在旁观其他并发房间的人也踢掉。
+        for (UUID rosterId : teams.keySet()) {
+            plugin.spectator().forgetQuietly(rosterId);
+        }
+
+        // 先传送 / 记分板 / 出生增益，同 tick 内立刻建笼：玩家不会先掉出笼外
+        List<Location> spawns = new ArrayList<>();
+        for (Map.Entry<UUID, TeamId> entry : teams.entrySet()) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null || !player.isOnline()) {
+                continue;
+            }
+            if (player.getGameMode() == GameMode.SPECTATOR) {
+                player.setGameMode(GameMode.SURVIVAL);
+            }
+            // 开局清背包：先把玩家当前背包（含已发的角色武器 + 自带物品）整体备份，
+            // 然后清空，再按绑定角色重新发放武器与护甲——保证对局里只有统一装备，
+            // 结算时把备份原样还回去。
+            stashAndClearInventory(player);
+            String charId = characterIdOf(player.getUniqueId());
+            if (charId != null) {
+                plugin.giveCharacterWeapons(player, charId);
+            }
+            Location spawn = arena.spawn(entry.getValue());
+            if (spawn != null) {
+                player.teleport(spawn);
+                spawns.add(spawn);
+            }
+            board.showTo(player);
+            applySpawnBuff(player);
+        }
+
+        // 对局区域四周立屏障墙（从世界最低点到最高点），防外人闯入、防玩家跑出
+        barrier.build();
+
+        // CAGED：出生点玻璃笼内无敌冻结 hold 秒，到时笼解除再正式开战；hold=0 或建笼失败则直接开战
+        int hold = Math.max(0, plugin.config().waitingCageHoldSeconds());
+        int cageBlocks = hold > 0 ? cage.build(spawns) : 0;
+        if (hold > 0 && cageBlocks > 0) {
+            phase = Phase.CAGED;
+            for (Map.Entry<UUID, TeamId> entry : teams.entrySet()) {
+                Player player = Bukkit.getPlayer(entry.getKey());
+                if (player != null && player.isOnline()) {
+                    enterCageState(player, hold);
+                }
+            }
+            broadcastMessage("room.cage-hold", "seconds", hold);
+            cageTask = scheduleOnce(this::releaseCage, hold * 20L);
+            return null;
+        }
+        cage.clear();
+        startPlay(red, blue);
+        return null;
+    }
+
+    /** 笼内状态：无敌 + 满额缓慢（围笼本身已封死位移，效果用于阻止笼内互打/乱动）。 */
+    private void enterCageState(Player player, int holdSeconds) {
+        player.setInvulnerable(true);
+        var slowness = plugin.versions().potionEffect("SLOWNESS");
+        if (slowness != null) {
+            player.addPotionEffect(new PotionEffect(slowness, holdSeconds * 20 + 20, 255,
+                    false, false, false));
+        }
+    }
+
+    /** 解除笼内状态：只对生存/冒险玩家关无敌，避免误改创造模式管理员。 */
+    private void exitCageState(Player player) {
+        if (player.getGameMode() == GameMode.SURVIVAL || player.getGameMode() == GameMode.ADVENTURE) {
+            player.setInvulnerable(false);
+        }
+        var slowness = plugin.versions().potionEffect("SLOWNESS");
+        if (slowness != null) {
+            player.removePotionEffect(slowness);
+        }
+    }
+
+    /** 玻璃笼到时：还原方块、解除冻结与无敌，正式开战。 */
+    private void releaseCage() {
+        cageTask = null;
+        if (phase != Phase.CAGED) {
+            return;
+        }
+        cage.restore();
+        for (Map.Entry<UUID, TeamId> entry : teams.entrySet()) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player != null && player.isOnline()) {
+                exitCageState(player);
+            }
+        }
+        startPlay(!teamPlayers(TeamId.RED).isEmpty(), !teamPlayers(TeamId.BLUE).isEmpty());
+    }
+
+    /**
+     * 玩家是否正处于本房间的笼内冻结阶段（Task 7 等待区保护监听器判定用）。
+     */
+    public boolean isCaged(UUID uuid) {
+        return phase == Phase.CAGED && teams.containsKey(uuid);
+    }
+
+    /**
+     * 玩家是否处于"房间保护期"：WAITING/STARTING 的等待者或 CAGED 的参赛者。
+     * 保护期内免一切伤害/不掉饥饿/禁破坏放置；事件监听器据此统一放行或取消。
+     */
+    public boolean isProtected(UUID uuid) {
+        if (uuid == null) {
+            return false;
+        }
+        return switch (phase) {
+            case WAITING, STARTING -> waiting.contains(uuid);
+            case CAGED -> teams.containsKey(uuid);
+            default -> false;
+        };
+    }
+
+    /** 某方块是否是本房间当前玻璃笼的一部分（CAGED 期间防破坏用）。 */
+    public boolean isCageBlock(Location location) {
+        return cage.isCageBlock(location);
+    }
+
+    /** 某方块是否是本房间当前区域屏障墙的一部分（对局期间防破坏用）。 */
+    public boolean isBarrierBlock(Location location) {
+        return barrier.isBarrierBlock(location);
+    }
+
+    /** 某位置是否落在本房间场地活动范围（基地/刷新区/道具点的外包矩形）内。 */
+    public boolean isPlayArea(Location location) {
+        CuboidRegion bounds = arena.playBounds();
+        return bounds != null && bounds.contains(location);
+    }
+
+    /** 玩家当前绑定的角色 id（未绑定返回 null）。 */
+    private String characterIdOf(UUID uuid) {
+        var profile = plugin.config().characters().profileOrNull(uuid);
+        return profile == null ? null : profile.characterId();
+    }
+
+    // ---------------------------------------------------------------- 背包备份与返还
+
+    /**
+     * 把玩家当前背包（储物格 + 护甲 + 副手）整体备份后清空。
+     * 备份按 UUID 存，{@link #restoreInventory} 在结算时返还。
+     */
+    private void stashAndClearInventory(Player player) {
+        if (player == null) {
+            return;
+        }
+        UUID uuid = player.getUniqueId();
+        var inv = player.getInventory();
+        backupContents.put(uuid, inv.getStorageContents().clone());
+        backupArmor.put(uuid, inv.getArmorContents().clone());
+        backupOffhand.put(uuid, inv.getItemInOffHand().clone());
+        inv.clear();
+    }
+
+    /**
+     * 结算时把开局前备份的背包原样还给玩家（先清掉对局中捡的道具/装备，再写回备份）。
+     * 玩家不在线则跳过（备份丢弃；重连时由 {@link #restoreInventoryIfAny} 兜底）。
+     */
+    private void restoreInventory(UUID uuid) {
+        Player player = Bukkit.getPlayer(uuid);
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        restoreInventoryIfAny(player);
+    }
+
+    /**
+     * 取出并移除该玩家的背包备份（玩家对局中掉线时由 RoomManager 转存到全局暂存，
+     * 等其重连后再返还，避免结算时因不在线而丢失原物品）。没有备份返回 null。
+     */
+    public org.bukkit.inventory.ItemStack[][] extractBackup(UUID uuid) {
+        org.bukkit.inventory.ItemStack[] contents = backupContents.remove(uuid);
+        org.bukkit.inventory.ItemStack[] armor = backupArmor.remove(uuid);
+        org.bukkit.inventory.ItemStack offhand = backupOffhand.remove(uuid);
+        if (contents == null && armor == null && offhand == null) {
+            return null;
+        }
+        return new org.bukkit.inventory.ItemStack[][]{contents, armor, offhand == null ? null : new org.bukkit.inventory.ItemStack[]{offhand}};
+    }
+
+    /** 若该玩家在本房间有背包备份，清掉当前背包并写回备份（重连兜底/结算通用）。 */
+    public void restoreInventoryIfAny(Player player) {
+        if (player == null) {
+            return;
+        }
+        UUID uuid = player.getUniqueId();
+        org.bukkit.inventory.ItemStack[] contents = backupContents.remove(uuid);
+        org.bukkit.inventory.ItemStack[] armor = backupArmor.remove(uuid);
+        org.bukkit.inventory.ItemStack offhand = backupOffhand.remove(uuid);
+        if (contents == null && armor == null && offhand == null) {
+            return;
+        }
+        var inv = player.getInventory();
+        inv.clear();
+        if (contents != null) {
+            inv.setStorageContents(contents);
+        }
+        if (armor != null) {
+            inv.setArmorContents(armor);
+        }
+        if (offhand != null) {
+            inv.setItemInOffHand(offhand);
+        }
+    }
+
+    /** 进入 PLAYING：计时起算、启动房间组件、开局播报。 */
+    private void startPlay(boolean red, boolean blue) {
+        phase = Phase.PLAYING;
+        startedAt = System.currentTimeMillis();
+        endedAt = 0L;
+
+        minions.start();
+        loot.start();
+        if (isPve()) {
+            baseCapture.stop();   // PVE 没有敌方基地要拆
+            String outpostError = outpost.start(plugin.pveSettings());
+            if (outpostError != null) {
+                plugin.getLogger().warning("[pve] 房间 " + id() + " 据点未能生成：" + outpostError);
+                broadcast("<yellow>据点未生成：<gray>" + outpostError);
+            }
+        } else {
+            baseCapture.start();
+            outpost.stop();
+        }
+        board.updateAll();
+
+        broadcast("<gold><bold>对局开始！</bold></gold> <gray>先到 <white>" + rules().scoreToWin()
+                + "</white> 分获胜，时限 <white>" + (rules().timeLimitSeconds() / 60) + "</white> 分钟。");
+        if (isPve()) {
+            broadcast("<aqua>PVE 模式</aqua> <gray>所有人同一队，击杀月人得分：<white>+"
+                    + rules().minionKillScore() + "</white> / 只；<gray>玩家之间不会互相造成伤害。");
+            broadcast("<gray>死亡 <white>" + rules().respawnDelaySeconds()
+                    + "</white> 秒后在出生点复活；本模式没有基地占点。");
+        } else {
+            broadcast("<gray>击杀月人 <white>+" + rules().minionKillScore()
+                    + "</white> / 击杀玩家 <white>+" + rules().playerKillScore()
+                    + "</white> / 拆除基地 <white>+" + rules().baseCaptureScore() + "</white>");
+            long delay = (long) rules().baseCaptureDelaySeconds();
+            if (delay > 0L) {
+                broadcast("<gray>基地保护期 <white>" + delay + "</white> 秒，期间无法占点。");
+            }
+            if (!red || !blue) {
+                TeamId empty = red ? TeamId.BLUE : TeamId.RED;
+                broadcast("<yellow>强制开局：<white>" + empty.display()
+                        + "</white> 暂时无人，之后可以用 <white>/taketori team <玩家> "
+                        + empty.key() + "</white> 补人。");
+            }
+        }
+    }
+
+    /** 管理员手动结束：倒计时中取消回 WAITING；笼内/战斗中进入 ENDING 结算。 */
+    public void stop(String reason) {
+        if (phase == Phase.WAITING || phase == Phase.ENDING) {
+            return;
+        }
+        if (phase == Phase.STARTING) {
+            cancelStarting(reason);
+            return;
+        }
+        broadcast("<yellow>对局被结束：" + reason);
+        settle(null, false);
+    }
+
+    /**
+     * 由 RoomManager 每秒调用：等待人数→倒计时→开局、CAGED/PLAYING 时限与空房收房、
+     * ENDING 提前收房（观战提醒由 RoomManager 统一处理）。
+     */
+    public void tick() {
+        switch (phase) {
+            case WAITING -> {
+                if (waitingCount() >= effectiveMinPlayers()) {
+                    enterStarting();
+                }
+            }
+            case STARTING -> tickStarting();
+            case CAGED -> {
+                // 笼子阶段全员离线：不结算，直接还原收房
+                if (onlineParticipantCount() == 0) {
+                    abortEmpty();
+                }
+            }
+            case PLAYING -> {
+                if (onlineParticipantCount() == 0) {
+                    abortEmpty();
+                    return;
+                }
+                if (remainingMillis() <= 0L) {
+                    int redScore = teamScore(TeamId.RED);
+                    int blueScore = teamScore(TeamId.BLUE);
+                    if (redScore == blueScore) {
+                        finish(null);
+                    } else {
+                        finish(redScore > blueScore ? TeamId.RED : TeamId.BLUE);
+                    }
+                }
+            }
+            case ENDING -> {
+                // 结算期间人走光了：不必再等 end-delay
+                if (onlineParticipantCount() == 0) {
+                    endCleanup();
+                }
+            }
+        }
+    }
+
+    /** 生效的最低开局人数：配置值不得大于当前模式的满员人数。 */
+    private int effectiveMinPlayers() {
+        return Math.max(1, Math.min(plugin.config().waitingMinPlayers(), maxPlayers()));
+    }
+
+    /** WAITING → STARTING：按配置初始化常规倒计时；达标瞬间已满员则直接用短倒计时。 */
+    private void enterStarting() {
+        phase = Phase.STARTING;
+        countdownStart = System.currentTimeMillis();
+        long normalMillis = Math.max(1L, plugin.config().waitingCountdownSeconds()) * 1000L;
+        countdownFullMillis = (long) plugin.config().waitingFullCountdownSeconds() * 1000L;
+        boolean alreadyFull = waitingCount() >= maxPlayers();
+        countdownFull = alreadyFull;
+        countdownMillis = alreadyFull ? Math.min(normalMillis, countdownFullMillis) : normalMillis;
+        long seconds = (countdownMillis + 999L) / 1000L;
+        broadcastMessage(alreadyFull ? "room.countdown-full" : "room.countdown", "seconds", seconds);
+        if (plugin.config().debug()) {
+            plugin.getLogger().info("[room " + id() + "] 倒计时开始：" + seconds
+                    + "s（" + (alreadyFull ? "满员短倒计时" : "常规倒计时") + "，"
+                    + waitingCount() + "/" + maxPlayers() + "）");
+        }
+    }
+
+    /** STARTING 每秒：满员缩短、掉人取消、归零开局。 */
+    private void tickStarting() {
+        int online = waitingCount();
+        if (online < effectiveMinPlayers()) {
+            phase = Phase.WAITING;
+            countdownMillis = 0L;
+            countdownFull = false;
+            broadcastMessage("room.countdown-cancel");
+            return;
+        }
+        long remaining = countdownStart + countdownMillis - System.currentTimeMillis();
+
+        // 满员：一次性切到短倒计时（不大于当前剩余；full=0 时下一秒立即开局）
+        if (!countdownFull && online >= maxPlayers()) {
+            countdownFull = true;
+            countdownStart = System.currentTimeMillis();
+            countdownMillis = Math.min(Math.max(0L, remaining), countdownFullMillis);
+            remaining = countdownMillis;
+            broadcastMessage("room.countdown-full", "seconds", (countdownMillis + 999L) / 1000L);
+        }
+
+        long seconds = Math.max(0L, (remaining + 999L) / 1000L);
+        Component actionBar = plugin.config().messages().get(
+                countdownFull ? "room.countdown-full" : "room.countdown", "seconds", seconds);
+        for (Player player : waitingPlayers()) {
+            player.sendActionBar(actionBar);
+        }
+
+        if (remaining <= 0L) {
+            String error = beginMatch(false);
+            if (error != null) {
+                // 理论上倒计时归零时人数刚校验过不会失败；兜底回到等待并提示
+                phase = Phase.WAITING;
+                countdownMillis = 0L;
+                countdownFull = false;
+                broadcast("<red>自动开局失败：<gray>" + error);
+            }
+        }
+    }
+
+    /** 管理员在倒计时阶段取消：回到 WAITING 并说明原因。 */
+    private void cancelStarting(String reason) {
+        phase = Phase.WAITING;
+        countdownMillis = 0L;
+        countdownFull = false;
+        broadcast("<yellow>开局倒计时已取消：<gray>" + reason);
+    }
+
+    /** CAGED/PLAYING 全员离线：不写战绩、不播报胜负，直接停组件收房。 */
+    private void abortEmpty() {
+        if (cageTask != null) {
+            cageTask.cancel();
+            cageTask = null;
+        }
+        if (endTask != null) {
+            endTask.cancel();
+            endTask = null;
+        }
+        cage.restore();
+        stopComponents();
+        if (plugin.config().debug()) {
+            plugin.getLogger().info("[room " + id() + "] 参与者全部离线，空房自动收房回 WAITING");
+        }
+        endCleanup();
+    }
+
+    /** 停掉房间全部对局组件（刷怪/据点/道具/占点）并清掉房间世界里的技能弹体与掉落物。 */
+    private void stopComponents() {
+        minions.stop();
+        outpost.stop();
+        loot.stop();
+        baseCapture.stop();
+        clearSkillProjectiles();
+        clearDroppedItems();
+    }
+
+    /**
+     * 清掉本房间<b>场地区域内</b>的掉落物（结算重置 / reload / 禁用时，下一轮不得残留上局物品）。
+     * 只按场地配置区域（基地/刷新区/道具点）判定，不按整个世界清空——同一世界并存多个场地时，
+     * 世界一刀切会误删其他房间乃至大厅的掉落物；区域外的散落物交给原版自然消失。
+     */
+    private void clearDroppedItems() {
+        for (String worldName : roomWorlds()) {
+            World world = Bukkit.getWorld(worldName);
+            if (world == null) {
+                continue;
+            }
+            for (Item drop : world.getEntitiesByClass(Item.class)) {
+                if (arena.containsRegionLocation(drop.getLocation())) {
+                    drop.remove();
+                }
+            }
+        }
+    }
+
+    /**
+     * 移除本房间<b>场地区域内</b>的技能弹体（带 proj_damage PDC 的投射物；普通箭自行消失，不动它）。
+     * 同样限定场地区域，避免同世界多场地时删掉别的房间在飞弹体。
+     */
+    private void clearSkillProjectiles() {
+        for (String worldName : roomWorlds()) {
+            World world = Bukkit.getWorld(worldName);
+            if (world == null) {
+                continue;
+            }
+            for (Projectile projectile : world.getEntitiesByClass(Projectile.class)) {
+                if (projectile.getPersistentDataContainer()
+                        .has(PDCKeys.projDamage(), PersistentDataType.DOUBLE)
+                        && arena.containsRegionLocation(projectile.getLocation())) {
+                    projectile.remove();
+                }
+            }
+        }
+    }
+
+    /**
+     * 一次性延时任务：SchedulerAdapter 只暴露自管句柄的周期任务，
+     * 这里包成"首次执行先取消自己"的单次任务并返回句柄。
+     */
+    private BukkitTask scheduleOnce(Runnable runnable, long delayTicks) {
+        long delay = Math.max(0L, delayTicks);
+        BukkitTask[] holder = new BukkitTask[1];
+        holder[0] = plugin.scheduler().runTimerTask(() -> {
+            if (holder[0] != null) {
+                holder[0].cancel();
+            }
+            runnable.run();
+        }, delay, Math.max(1L, delay));
+        return holder[0];
+    }
+
+    /** 把 messages.yml 文案按房间播报范围发出去（加入/离开等大厅层播报也走这里）。 */
+    public void broadcastMessage(String key, Object... placeholders) {
+        broadcastComponent(plugin.config().messages().get(key, placeholders));
+    }
+
+    /** 与 {@link #broadcast(String)} 同样世界范围，但发送已渲染组件。 */
+    private void broadcastComponent(Component component) {
+        String scope = plugin.config().broadcastScope();
+        Set<String> worlds = roomWorlds();
+        if ("all".equalsIgnoreCase(scope) || worlds.isEmpty()) {
+            Bukkit.getServer().sendMessage(component);
+            return;
+        }
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (WorldScope.shouldReceive(scope, worlds, player.getWorld().getName())) {
+                player.sendMessage(component);
+            }
+        }
+    }
+
+    public long remainingMillis() {
+        // 计时从正式开战（PLAYING）起算：等待/倒计时/笼内冻结都不消耗对局时间
+        if (phase != Phase.PLAYING && phase != Phase.ENDING) {
+            return rules().timeLimitMillis();
+        }
+        long base = phase == Phase.PLAYING ? System.currentTimeMillis() : endedAt;
+        return Math.max(0L, rules().timeLimitMillis() - (base - startedAt));
+    }
+
+    public String remainingText() {
+        long seconds = remainingMillis() / 1000L;
+        return String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60);
+    }
+
+    /** STARTING 剩余整秒（房间列表倒计时显示用）；其他阶段返回 0。 */
+    public int countdownSeconds() {
+        if (phase != Phase.STARTING) {
+            return 0;
+        }
+        long remaining = countdownStart + countdownMillis - System.currentTimeMillis();
+        return (int) Math.max(0L, (remaining + 999L) / 1000L);
+    }
+
+    /** 开局后已经过的秒数（基地保护期判定用）。 */
+    public long elapsedSeconds() {
+        if (phase != Phase.PLAYING && phase != Phase.ENDING) {
+            return 0L;
+        }
+        long base = phase == Phase.PLAYING ? System.currentTimeMillis() : endedAt;
+        return Math.max(0L, (base - startedAt) / 1000L);
+    }
+
+    /** 基地是否已过保护期、可以开始占点。 */
+    public boolean isBaseCaptureOpen() {
+        return phase == Phase.PLAYING && elapsedSeconds() >= (long) rules().baseCaptureDelaySeconds();
+    }
+
+    /** 保护期剩余秒数（0 = 已开放占点）。 */
+    public long baseCaptureDelayRemaining() {
+        if (phase != Phase.PLAYING) {
+            return 0L;
+        }
+        return Math.max(0L, (long) rules().baseCaptureDelaySeconds() - elapsedSeconds());
+    }
+
+    // ---------------------------------------------------------------- 结算
+
+    /** 达到目标分 / 时间到。 */
+    public void finish(TeamId winnerTeam) {
+        settle(winnerTeam, true);
+    }
+
+    /**
+     * 结算收尾：停组件、播报胜负/得分王、写跨局战绩，进入 ENDING；
+     * 等待 {@code waiting.end-delay-seconds} 后由 {@link #endCleanup()} 回大厅并重置为 WAITING。
+     * 笼内被结束时先取消解除任务、还原笼子。
+     *
+     * @param recordStats 管理员手动停止时不写战绩
+     */
+    private void settle(TeamId winnerTeam, boolean recordStats) {
+        if (phase == Phase.ENDING || phase == Phase.WAITING) {
+            return;
+        }
+        // 笼内被结束：取消解除任务、还原玻璃笼、解除玩家无敌/冻结
+        if (cageTask != null) {
+            cageTask.cancel();
+            cageTask = null;
+        }
+        boolean fromCage = phase == Phase.CAGED;
+        if (fromCage) {
+            cage.restore();
+        }
+        phase = Phase.ENDING;
+        endedAt = System.currentTimeMillis();
+        winner = winnerTeam;
+        stopComponents();
+        if (fromCage) {
+            for (UUID uuid : new ArrayList<>(teams.keySet())) {
+                Player player = Bukkit.getPlayer(uuid);
+                if (player != null && player.isOnline()) {
+                    exitCageState(player);
+                }
+            }
+        }
+        board.updateAll();
+
+        Map.Entry<UUID, Integer> top = topScorer();
+        if (isPve()) {
+            boolean cleared = teamScore(TeamId.RED) >= rules().scoreToWin();
+            broadcast("<dark_gray>========================================");
+            broadcast(cleared
+                    ? "<green><bold>挑战成功！</bold></green> <gray>总分 <white>" + teamScore(TeamId.RED)
+                    + "</white> / " + rules().scoreToWin()
+                    : "<yellow><bold>时间到</bold></yellow> <gray>未能达成目标：总分 <white>"
+                    + teamScore(TeamId.RED) + "</white> / " + rules().scoreToWin());
+            broadcast("<gray>参与成员：<white>" + memberNames(TeamId.RED));
+            broadcast("<gray>最后得分：<white>" + nameOf(lastScorer) + " <gray>(+"
+                    + lastScoreAmount + " " + lastScoreReason + ")");
+            broadcast(top == null
+                    ? "<gray>本局得分王：<white>无"
+                    : "<gray>本局得分王：<white>" + nameOf(top.getKey())
+                    + " <gray>(<white>" + top.getValue() + " 分<gray>)");
+            broadcast("<dark_gray>========================================");
+        } else {
+            String resultLine = winnerTeam == null
+                    ? "<yellow>平局！"
+                    : winnerTeam.colorTag() + "<bold>" + winnerTeam.display() + "</bold></color> <green>获胜！";
+            broadcast("<dark_gray>========================================");
+            broadcast(resultLine + " <gray>比分 " + TeamId.RED.colorTag() + teamScore(TeamId.RED)
+                    + " <gray>: " + TeamId.BLUE.colorTag() + teamScore(TeamId.BLUE));
+            broadcast("<gray>获胜队伍成员：<white>" + memberNames(winnerTeam));
+            broadcast("<gray>最后得分：<white>" + nameOf(lastScorer) + " <gray>(+"
+                    + lastScoreAmount + " " + lastScoreReason + ")");
+            broadcast(top == null
+                    ? "<gray>本局得分王：<white>无"
+                    : "<gray>本局得分王：<white>" + nameOf(top.getKey())
+                    + " <gray>(<white>" + top.getValue() + " 分<gray>)");
+            broadcast("<dark_gray>========================================");
+        }
+
+        if (recordStats) {
+            plugin.stats().recordMatch(winnerTeam, teamScores, playerScores, playerNames);
+            if (winnerTeam != null) {
+                List<String> winners = new ArrayList<>();
+                for (Map.Entry<UUID, TeamId> entry : teams.entrySet()) {
+                    if (entry.getValue() == winnerTeam) {
+                        winners.add(nameOf(entry.getKey()));
+                    }
+                }
+                plugin.stats().recordWin(winners);
+            }
+        }
+
+        // ENDING：停留 end-delay 秒再统一回大厅/重置房间；期间人走光则由 tick 提前收房
+        int delaySeconds = Math.max(0, plugin.config().waitingEndDelaySeconds());
+        broadcastMessage("room.end-return");
+        endTask = scheduleOnce(this::endCleanup, delaySeconds * 20L);
+    }
+
+    /**
+     * 结算后的收尾（由 end-delay 延时任务 / 空房判定触发，幂等）：取消残留定时任务、
+     * 还原笼子、停组件、清旁观、在线者回大厅、隐藏记分板，然后解除玩家→房间映射，
+     * 清空名单/比分回到 WAITING，可立即匹配下一轮。
+     */
+    private void endCleanup() {
+        if (endTask != null) {
+            endTask.cancel();
+            endTask = null;
+        }
+        if (cageTask != null) {
+            cageTask.cancel();
+            cageTask = null;
+        }
+        cage.restore();
+        barrier.restore();
+        stopComponents();
+
+        List<UUID> members = new ArrayList<>(teams.keySet());
+        // 只清旁观本房的观众（退回大厅）；其他房间的观众不受影响
+        plugin.spectator().clearAudienceOfRoom(this);
+        boolean returnToLobby = plugin.config().lobbyReturnAfterMatch();
+        for (UUID uuid : members) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player == null || !player.isOnline()) {
+                continue;
+            }
+            // 阵亡等待复活的参赛者：静默清掉死亡旁观登记，下面统一送回大厅
+            plugin.spectator().forgetQuietly(uuid);
+            exitCageState(player);
+            // 结算返还开局前备份的背包（先还再送大厅，避免回大厅时还穿着对局装备）
+            restoreInventory(uuid);
+            if (returnToLobby) {
+                plugin.lobby().sendToLobby(player);
+            }
+        }
+        for (UUID uuid : members) {
+            board.hide(Bukkit.getPlayer(uuid));
+        }
+
+        // 人已回大厅：解除玩家→本房间映射，等待区/队伍名单全部清空，房间可再匹配
+        manager.detachRoom(this);
+        waiting.clear();
+        clearTeams();
+        resetScores();
+        countdownMillis = 0L;
+        countdownFull = false;
+        phase = Phase.WAITING;
+        board.updateAll();
+        if (plugin.config().debug()) {
+            plugin.getLogger().info("[room " + id() + "] 收尾完成，回到 WAITING 可再匹配");
+        }
+    }
+
+    /**
+     * 注册表重建 / 插件卸载时调用：取消延时任务、还原玻璃笼、停掉全部对局组件与记分板。
+     * 幂等；不重置 phase（该房间对象之后不再被使用）。
+     */
+    public void shutdown() {
+        if (cageTask != null) {
+            cageTask.cancel();
+            cageTask = null;
+        }
+        if (endTask != null) {
+            endTask.cancel();
+            endTask = null;
+        }
+        cage.restore();
+        barrier.restore();
+        stopComponents();
+        // 插件卸载/重载时，在线参赛者也得拿回自己的背包
+        for (UUID uuid : teams.keySet()) {
+            restoreInventory(uuid);
+        }
+        board.clearAll();
+    }
+
+    private String memberNames(TeamId team) {
+        if (team == null) {
+            return "无";
+        }
+        List<Player> players = teamPlayers(team);
+        if (players.isEmpty()) {
+            return "（已离线）";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (Player player : players) {
+            if (!builder.isEmpty()) {
+                builder.append("、");
+            }
+            builder.append(player.getName());
+        }
+        return builder.toString();
+    }
+
+    public TeamId winner() {
+        return winner;
+    }
+
+    // ---------------------------------------------------------------- 房间组件
+
+    public MinionSpawner minions() {
+        return minions;
+    }
+
+    public BaseCaptureManager baseCapture() {
+        return baseCapture;
+    }
+
+    public OutpostManager outpost() {
+        return outpost;
+    }
+
+    public LootSpawner loot() {
+        return loot;
+    }
+
+    public MatchScoreboard scoreboard() {
+        return board;
+    }
+
+    // ---------------------------------------------------------------- 播报
+
+    /**
+     * 本房间涉及的世界集合（出生点 / 基地 / 月人刷新区 / PVE 据点 / 等待点）。
+     * 用途：把房间播报限制在"场地世界"内。
+     */
+    public Set<String> roomWorlds() {
+        Set<String> worlds = new LinkedHashSet<>();
+        for (TeamId team : TeamId.values()) {
+            Location spawn = arena.spawn(team);
+            if (spawn != null && spawn.getWorld() != null) {
+                worlds.add(spawn.getWorld().getName());
+            }
+            for (CuboidRegion region : arena.bases(team).values()) {
+                if (region != null && region.worldName() != null) {
+                    worlds.add(region.worldName());
+                }
+            }
+        }
+        for (CuboidRegion region : arena.minionRegions().values()) {
+            if (region != null && region.worldName() != null) {
+                worlds.add(region.worldName());
+            }
+        }
+        Location outpostSpot = arena.outpost();
+        if (outpostSpot != null && outpostSpot.getWorld() != null) {
+            worlds.add(outpostSpot.getWorld().getName());
+        }
+        Location wait = arena.waitSpawn();
+        if (wait != null && wait.getWorld() != null) {
+            worlds.add(wait.getWorld().getName());
+        }
+        return worlds;
+    }
+
+    /**
+     * 房间播报：默认只发给场地世界里的玩家（worlds.broadcast-scope: world）；
+     * 配成 all 时全服广播。尚未记录到任何场地世界时按全服发送，避免消息静默丢失。
+     */
+    public void broadcast(String miniMessage) {
+        String scope = plugin.config().broadcastScope();
+        Component component = MINI.deserialize(miniMessage);
+        Set<String> worlds = roomWorlds();
+        if ("all".equalsIgnoreCase(scope) || worlds.isEmpty()) {
+            Bukkit.getServer().sendMessage(component);
+            return;
+        }
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (WorldScope.shouldReceive(scope, worlds, player.getWorld().getName())) {
+                player.sendMessage(component);
+            }
+        }
+    }
+}

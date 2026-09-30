@@ -3,8 +3,10 @@ package com.taketori.kassen.paper.command;
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.lobby.LobbyAction;
 import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.paper.match.ArenaDef;
 import com.taketori.kassen.paper.match.ArenaManager;
 import com.taketori.kassen.paper.match.CuboidRegion;
+import com.taketori.kassen.paper.match.room.GameRoom;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
@@ -45,6 +47,8 @@ public final class AdminMenu implements Listener {
     /** 菜单页码。 */
     private enum Page {
         MAIN,
+        ROOMS,
+        ROOM,
         DELETE
     }
 
@@ -57,6 +61,10 @@ public final class AdminMenu implements Listener {
 
         private final Page page;
         private final Map<Integer, DeleteTarget> targets = new HashMap<>();
+        /** 房间选择页：槽位 → 场地/房间 id。 */
+        private final Map<Integer, String> roomSlots = new HashMap<>();
+        /** 房间控制页：当前操作的房间 id。 */
+        private String roomId;
         private Inventory inventory;
 
         Holder(Page page) {
@@ -101,23 +109,15 @@ public final class AdminMenu implements Listener {
         inventory.setItem(4, button(Material.NETHER_STAR, "<gold>管理员菜单",
                 "<gray>点按钮 = 执行对应指令",
                 "<gray>需要参数的会给出可点击的建议指令",
-                "<dark_gray>对局：<white>" + plugin.match().phase()
-                        + " <dark_gray>模式：<white>" + (plugin.match().isPve() ? "PVE" : "PVP")));
+                "<dark_gray>房间：<white>" + plugin.rooms().rooms().size() + " 个"
+                        + " <dark_gray>进行中：<white>" + plugin.rooms().rooms().stream()
+                        .filter(GameRoom::isRunning).count() + " 个"));
 
-        // ---- 对局控制 ----
-        inventory.setItem(10, run(Material.LIME_DYE, "<green>开始对局",
-                "<dark_gray>/taketori match start", "taketori match start"));
-        inventory.setItem(11, run(Material.LIME_CONCRETE, "<green>强制开局（人数不够也开）",
-                "<dark_gray>/taketori match force（会把大厅里的人自动分队）", "taketori match force"));
-        inventory.setItem(12, run(Material.RED_CONCRETE, "<red><bold>强制结束对局",
-                "<dark_gray>/taketori match stop",
-                "<gray>立刻结算当前对局并把所有人恢复为生存", "taketori match stop 管理员通过菜单结束"));
-        inventory.setItem(13, run(Material.BOOK, "<white>对局状态",
-                "<dark_gray>/taketori match status", "taketori match status"));
-        inventory.setItem(14, run(Material.IRON_SWORD, "<aqua>切换到 PVE",
-                "<dark_gray>/taketori match mode pve", "taketori match mode pve"));
-        inventory.setItem(15, run(Material.SHIELD, "<red>切换到 PVP",
-                "<dark_gray>/taketori match mode pvp", "taketori match mode pvp"));
+        // ---- 对局控制：先选房间（BedWars 式多房间：不能再对"当前唯一对局"直接下手）----
+        inventory.setItem(10, button(Material.CHEST, "<green>房间管理",
+                "<gray>开局 / 强制开局 / 结束 / 切模式 / 查看状态",
+                "<yellow>先选择要操作的房间，再执行",
+                "<dark_gray>等价命令：/taketori match start|stop|mode ... [场地id]"));
 
         // ---- 场地 ----
         inventory.setItem(19, run(Material.NETHERITE_HOE, "<yellow>领选区锄",
@@ -167,6 +167,116 @@ public final class AdminMenu implements Listener {
         player.openInventory(inventory);
     }
 
+    // ---------------------------------------------------------------- 房间选择页 / 房间控制页
+
+    /** 房间选择：列出全部房间（阶段/模式/人数），点一个进它的控制页。 */
+    public void openRooms(Player player) {
+        if (player == null || !player.isOnline() || !player.hasPermission("taketori.admin")) {
+            return;
+        }
+        Holder holder = new Holder(Page.ROOMS);
+        Inventory inventory = Bukkit.createInventory(holder, 54,
+                MINI.deserialize("<dark_red>选择要管理的房间"));
+        holder.bind(inventory);
+
+        inventory.setItem(4, button(Material.CHEST, "<green>房间管理",
+                "<gray>每个场地对应一个独立房间，互不影响",
+                "<yellow>点房间图标进入它的控制页"));
+
+        int slot = 9;
+        for (GameRoom room : plugin.rooms().rooms()) {
+            if (slot >= 45) {
+                break;
+            }
+            Material material = switch (room.phase()) {
+                case WAITING -> Material.LIME_WOOL;
+                case STARTING -> Material.YELLOW_WOOL;
+                case CAGED -> Material.MAGENTA_WOOL;
+                case PLAYING -> Material.RED_WOOL;
+                case ENDING -> Material.GRAY_WOOL;
+            };
+            boolean live = room.phase() != GameRoom.Phase.WAITING && room.phase() != GameRoom.Phase.STARTING;
+            int count = live ? room.onlineParticipantCount() : room.waitingCount();
+            holder.roomSlots.put(slot, room.id());
+            inventory.setItem(slot, button(material, "<white>" + room.display() + " <dark_gray>[" + room.id() + "]",
+                    "<gray>阶段：<white>" + adminPhaseText(room),
+                    "<gray>模式：<white>" + (room.isPve() ? "PVE" : "PVP")
+                            + " <gray>人数 <white>" + count + "/" + room.maxPlayers(),
+                    room.arena().isReady() ? "<yellow>点击管理该房间"
+                            : "<red>场地未就绪：" + room.arena().missingHint()));
+            slot++;
+        }
+        if (holder.roomSlots.isEmpty()) {
+            inventory.setItem(22, button(Material.BARRIER, "<red>还没有启用场地的房间",
+                    "<gray>/taketori arena create <id> 后再 enable，或 /taketori reload"));
+        }
+
+        inventory.setItem(49, button(Material.ARROW, "<yellow>返回管理员菜单", "<gray>回到上一页"));
+        inventory.setItem(53, button(Material.BARRIER, "<red>关闭", "<gray>点一下关闭菜单"));
+        player.openInventory(inventory);
+    }
+
+    /** 单个房间的控制页：所有指令都带该房 id，绝不误伤别的房间。 */
+    public void openRoomControl(Player player, String roomId) {
+        if (player == null || !player.isOnline() || !player.hasPermission("taketori.admin")) {
+            return;
+        }
+        GameRoom room = plugin.rooms().room(roomId);
+        if (room == null) {
+            openRooms(player);
+            return;
+        }
+        Holder holder = new Holder(Page.ROOM);
+        holder.roomId = roomId;
+        Inventory inventory = Bukkit.createInventory(holder, 54,
+                MINI.deserialize("<dark_red>房间控制 <dark_gray>· <white>" + room.display()));
+        holder.bind(inventory);
+
+        inventory.setItem(4, button(Material.CHEST, "<gold>" + room.display() + " <dark_gray>[" + roomId + "]",
+                "<gray>阶段：<white>" + adminPhaseText(room),
+                "<gray>模式：<white>" + (room.isPve() ? "PVE" : "PVP"),
+                "<gray>等待/在场：<white>" + room.waitingCount() + " / " + room.onlineParticipantCount()
+                        + " <dark_gray>（上限 " + room.maxPlayers() + "）",
+                "<red>本页所有操作只作用于这个房间"));
+
+        inventory.setItem(10, run(Material.LIME_DYE, "<green>开始对局",
+                "<dark_gray>/taketori match start " + roomId,
+                "<gray>等待区人数达标时开局（人数不足会拒绝）",
+                "taketori match start " + roomId));
+        inventory.setItem(11, run(Material.LIME_CONCRETE, "<green>强制开局",
+                "<dark_gray>/taketori match force " + roomId,
+                "<gray>等待区有几人就按几人开局（单人测试用）",
+                "taketori match force " + roomId));
+        inventory.setItem(12, run(Material.RED_CONCRETE, "<red><bold>结束该房间",
+                "<dark_gray>/taketori match stop " + roomId + " 管理员通过菜单结束",
+                "<gray>立刻结算并把该房的人送回大厅，不影响其他房间",
+                "taketori match stop " + roomId + " 管理员通过菜单结束"));
+        inventory.setItem(13, run(Material.BOOK, "<white>该房间状态",
+                "<dark_gray>/taketori match status（查看全部房间）", "taketori match status"));
+        inventory.setItem(14, run(Material.IRON_SWORD, "<aqua>切为 PVE",
+                "<dark_gray>/taketori match mode pve " + roomId,
+                "<gray>仅等待中的房间可切；只改本房",
+                "taketori match mode pve " + roomId));
+        inventory.setItem(15, run(Material.SHIELD, "<red>切为 PVP",
+                "<dark_gray>/taketori match mode pvp " + roomId,
+                "<gray>仅等待中的房间可切；只改本房",
+                "taketori match mode pvp " + roomId));
+
+        inventory.setItem(49, button(Material.ARROW, "<yellow>返回房间列表", "<gray>回到上一页"));
+        inventory.setItem(53, button(Material.BARRIER, "<red>关闭", "<gray>点一下关闭菜单"));
+        player.openInventory(inventory);
+    }
+
+    private String adminPhaseText(GameRoom room) {
+        return switch (room.phase()) {
+            case WAITING -> "等待中 " + room.waitingCount() + "/" + room.maxPlayers();
+            case STARTING -> "倒计时 " + room.countdownSeconds() + "s";
+            case CAGED -> "开局准备中";
+            case PLAYING -> "游戏中（剩余 " + room.remainingText() + "）";
+            case ENDING -> "结算中";
+        };
+    }
+
     // ---------------------------------------------------------------- 删除页
 
     /** 删除页：动态列出已配置的基地 / 刷新区 / 道具点 / 据点，点条目即删除。 */
@@ -178,23 +288,30 @@ public final class AdminMenu implements Listener {
             player.sendMessage(MINI.deserialize("<red>需要 taketori.admin 权限。"));
             return;
         }
+        // 删除页只作用于管理员当前选中的场地（与 /taketori arena 各子命令的作用域一致）
+        ArenaDef def = plugin.arena().selected(player.getUniqueId());
+        if (def == null) {
+            player.sendMessage(MINI.deserialize("<red>还没有选中场地：<gray>先用 <white>/taketori arena select <场地id>"
+                    + "</white> 选中，或用 <white>/taketori arena list</white> 查看现有场地。"));
+            return;
+        }
         Holder holder = new Holder(Page.DELETE);
         Inventory inventory = Bukkit.createInventory(holder, 54,
-                MINI.deserialize("<dark_red>删除区域 <dark_gray>· <white>点条目即删除"));
+                MINI.deserialize("<dark_red>删除区域 <dark_gray>· <white>场地 " + def.id()));
         holder.bind(inventory);
 
         ArenaManager arena = plugin.arena();
-        inventory.setItem(4, button(Material.BARRIER, "<red>删除已划定的区域",
+        inventory.setItem(4, button(Material.BARRIER, "<red>删除场地 " + def.id() + " 已划定的区域",
                 "<gray>点某一条就<white>立刻删除</white>它（不可撤销）",
                 "<gray>删除后 <white>/taketori arena list</white> 立即反映",
                 "<dark_gray>基地删多了会导致「无法开局」，补划回来即可"));
 
-        fillBases(inventory, holder, arena, TeamId.RED, 0);
-        fillBases(inventory, holder, arena, TeamId.BLUE, 9);
+        fillBases(inventory, holder, def, TeamId.RED, 0);
+        fillBases(inventory, holder, def, TeamId.BLUE, 9);
 
-        int minionFilled = fillRegions(inventory, holder, arena.minionRegions(), 18,
+        int minionFilled = fillRegions(inventory, holder, def.minionRegions(), 18,
                 "月人刷新区", Material.ROTTEN_FLESH, "minion", "delminion");
-        int lootFilled = fillRegions(inventory, holder, arena.lootRegions(), 27,
+        int lootFilled = fillRegions(inventory, holder, def.lootRegions(), 27,
                 "道具刷新点", Material.CHEST, "loot", "delloot");
         if (minionFilled == 0) {
             inventory.setItem(18, button(Material.LIGHT_GRAY_STAINED_GLASS_PANE, "<dark_gray>月人刷新区",
@@ -205,11 +322,11 @@ public final class AdminMenu implements Listener {
                     "<dark_gray>还没配置"));
         }
 
-        if (arena.hasOutpost()) {
+        if (def.hasOutpost()) {
             int slot = 36;
             holder.targets().put(slot, new DeleteTarget("outpost", null, 0));
             inventory.setItem(slot, button(Material.SNOWBALL, "<white>PVE 据点",
-                    "<gray>位置：" + describe(arena.outpost()),
+                    "<gray>位置：" + describe(def.outpost()),
                     "<red>点击删除据点位置",
                     "<dark_gray>删除后 PVE 会回落到第一个月人刷新区中心"));
         } else {
@@ -229,10 +346,10 @@ public final class AdminMenu implements Listener {
     }
 
     /** 一行 9 格铺开某队的基地 #1..#9（未配置的用灰玻璃占位，不可点）。 */
-    private void fillBases(Inventory inventory, Holder holder, ArenaManager arena, TeamId team, int startSlot) {
+    private void fillBases(Inventory inventory, Holder holder, ArenaDef def, TeamId team, int startSlot) {
         for (int index = 1; index <= 9; index++) {
             int slot = startSlot + index - 1;
-            CuboidRegion region = arena.base(team, index);
+            CuboidRegion region = def.base(team, index);
             if (region == null) {
                 inventory.setItem(slot, button(Material.LIGHT_GRAY_STAINED_GLASS_PANE,
                         "<dark_gray>" + team.display() + " 基地 #" + index, "<dark_gray>未配置"));
@@ -337,6 +454,45 @@ public final class AdminMenu implements Listener {
         }
         int slot = event.getRawSlot();
 
+        if (holder.page == Page.ROOMS) {
+            if (slot == 49) {
+                open(player);
+                return;
+            }
+            if (slot == 53) {
+                player.closeInventory();
+                return;
+            }
+            String roomId = holder.roomSlots.get(slot);
+            if (roomId != null) {
+                openRoomControl(player, roomId);
+            }
+            return;
+        }
+
+        if (holder.page == Page.ROOM) {
+            if (slot == 49) {
+                openRooms(player);
+                return;
+            }
+            if (slot == 53) {
+                player.closeInventory();
+                return;
+            }
+            String id = holder.roomId;
+            switch (slot) {
+                case 10 -> execute(player, "taketori match start " + id);
+                case 11 -> execute(player, "taketori match force " + id);
+                case 12 -> execute(player, "taketori match stop " + id + " 管理员通过菜单结束");
+                case 13 -> execute(player, "taketori match status");
+                case 14 -> execute(player, "taketori match mode pve " + id);
+                case 15 -> execute(player, "taketori match mode pvp " + id);
+                default -> {
+                }
+            }
+            return;
+        }
+
         if (holder.page == Page.DELETE) {
             if (slot == 49) {
                 open(player);
@@ -354,12 +510,7 @@ public final class AdminMenu implements Listener {
         }
 
         switch (slot) {
-            case 10 -> execute(player, "taketori match start");
-            case 11 -> execute(player, "taketori match force");
-            case 12 -> execute(player, "taketori match stop 管理员通过菜单结束");
-            case 13 -> execute(player, "taketori match status");
-            case 14 -> execute(player, "taketori match mode pve");
-            case 15 -> execute(player, "taketori match mode pvp");
+            case 10 -> openRooms(player);
             case 19 -> execute(player, "taketori arena wand");
             case 20 -> execute(player, "taketori arena list");
             case 21 -> suggest(player, "/taketori arena setbase red 1");
@@ -383,9 +534,14 @@ public final class AdminMenu implements Listener {
     /** 删除页点击：按映射表执行删除，然后刷新本页（看到结果）。 */
     private void handleDelete(Player player, DeleteTarget target) {
         ArenaManager arena = plugin.arena();
+        ArenaDef def = arena.selected(player.getUniqueId());
+        if (def == null) {
+            player.sendMessage(MINI.deserialize("<red>选中的场地已不存在，请重新 <white>/taketori arena select</white>。"));
+            return;
+        }
         switch (target.kind()) {
             case "base" -> {
-                if (!arena.clearBase(target.team(), target.index())) {
+                if (!def.clearBase(target.team(), target.index())) {
                     player.sendMessage(MINI.deserialize("<red>该基地已经不在了（页面可能过期，已刷新）。"));
                 } else {
                     arena.save();
@@ -395,21 +551,21 @@ public final class AdminMenu implements Listener {
                 }
             }
             case "minion" -> {
-                if (arena.clearMinionRegion(target.index())) {
+                if (def.clearMinionRegion(target.index())) {
                     arena.save();
                     player.sendMessage(MINI.deserialize("<green>已删除月人刷新区 #" + target.index()
-                            + "。 <gray>剩余 <white>" + arena.minionRegionCount() + "</white> 个"));
+                            + "。 <gray>剩余 <white>" + def.minionRegionCount() + "</white> 个"));
                 }
             }
             case "loot" -> {
-                if (arena.clearLootRegion(target.index())) {
+                if (def.clearLootRegion(target.index())) {
                     arena.save();
                     player.sendMessage(MINI.deserialize("<green>已删除道具刷新点 #" + target.index()
-                            + "。 <gray>剩余 <white>" + arena.lootRegionCount() + "</white> 个"));
+                            + "。 <gray>剩余 <white>" + def.lootRegionCount() + "</white> 个"));
                 }
             }
             case "outpost" -> {
-                arena.clearOutpost();
+                def.clearOutpost();
                 arena.save();
                 player.sendMessage(MINI.deserialize("<green>已删除 PVE 据点位置。"
                         + " <gray>PVE 时会回落到第一个月人刷新区的中心"));

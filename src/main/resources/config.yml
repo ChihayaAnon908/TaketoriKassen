@@ -129,6 +129,30 @@ lobby:
   #   显式列出     = [ "world", "world_nether" ] 这样写
   takeover-worlds: []
 
+# ============================ 房间等待区（BedWars 式匹配）============================
+# 玩家在大厅「快速加入」或从房间列表进入某个房间后，先在该场地的等待出生点集结，
+# 人数达标开始倒计时；开局瞬间分队并传送进出生点玻璃笼，笼子解除后正式开战。
+# 每个场地的等待出生点用 /taketori arena setwait 设置（未设置的场地不能开局）。
+waiting:
+  # 等待人数达到多少开始倒计时
+  min-players: 2
+  # 达到最低人数后的倒计时秒数
+  countdown-seconds: 60
+  # 房间满员后的短倒计时秒数（PVP 满员 = team-size*2；PVE 见 pve-full-players）
+  full-countdown-seconds: 5
+  # 开局后出生点玻璃笼的保护秒数（0 = 不用笼子，分队传送后立即开战）
+  cage-hold-seconds: 3
+  # 对局结束后在房间里停留多少秒再统一送回大厅
+  end-delay-seconds: 5
+  # 玻璃笼的方块材质（原版 Material，例如 GLASS / GLASS_PANE / WHITE_STAINED_GLASS）
+  cage-material: GLASS
+  # PVE 房间的满员人数（0 = 取 match.team-size）
+  pve-full-players: 0
+  # 虚空判定：等待者 Y 坐标低于「等待出生点 Y + 该偏移」时自动拉回（负数表示在出生点下方）
+  void-y-offset: -10
+  # 等待区是否启用完全保护（无伤害/不饥饿/禁破坏放置）
+  protect: true
+
 scoring:
   minion-kill: 3      # 击杀小怪得分
   player-kill: 10     # 击杀对方玩家得分（队友互杀不计分）
@@ -172,12 +196,17 @@ loadout:
   armor-material: IRON    # 套装材质：IRON / CHAINMAIL / GOLDEN / LEATHER / DIAMOND / NETHERITE
   armor-protection: 2     # 保护附魔等级（2 = 保护 II）；0 = 不附魔
 
+# 月人刷新：种类 / 血量 / 精英属性在这里配置（全插件共用）。
+# 刷新节奏三项（interval-seconds / per-spawn / max-alive）是全局默认值，
+# 可在 arenas.yml 每个场地的 minion-spawn 段按场地覆盖（未配置的项用这里的默认值）。
+# 刷新区在 arenas.yml 的 minion-regions：<编号>.kind 可填 normal（只刷普通月人）
+# 或 mixed（普通+精英都刷，默认）；普通月人在全部区之间轮转均分，精英只在 mixed 区刷新。
 minion:
   health: 40           # 普通月人血量
   iron-armor: true     # 普通月人是否穿全套铁甲
-  interval-seconds: 9  # 刷新间隔（秒）—— 每刷新一批算「一波」
-  per-spawn: 3         # 每波刷新的普通月人数量
-  max-alive: 15        # 场上普通月人上限（达到就停止刷新）
+  interval-seconds: 9  # 刷新间隔（秒）—— 每刷新一批算「一波」（全局默认，可按场地覆盖）
+  per-spawn: 3         # 每波刷新的普通月人数量（全局默认，可按场地覆盖）
+  max-alive: 15        # 场上普通月人上限（达到就停止刷新；全局默认，可按场地覆盖）
   # 普通月人的种类与权重：每波按权重随机抽一种
   #   ZOMBIE = 僵尸、SKELETON = 骷髅（弓手）；也可以填其它原版实体名
   types:

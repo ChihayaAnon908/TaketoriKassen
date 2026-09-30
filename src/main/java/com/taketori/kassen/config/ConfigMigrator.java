@@ -16,7 +16,7 @@ import java.util.List;
 public final class ConfigMigrator {
 
     /** 当前配置结构版本；每次改动默认值或键名都要 +1，并在下面加一段迁移。 */
-    public static final int CURRENT_VERSION = 7;
+    public static final int CURRENT_VERSION = 8;
 
     private final TaketoriPlugin plugin;
 
@@ -128,6 +128,41 @@ public final class ConfigMigrator {
                 config.set("menu-clock.give-on-join", true);
                 notes.add("menu-clock: 新增（给玩家发一个右键打开玩家菜单的时钟，可关或换材质）");
             }
+        }
+
+        if (version < 8) {
+            // v7 → v8：BedWars 式多房间匹配。新增 waiting 等待区段——
+            // 玩家匹配后先进房间等待出生点集结，人数达标倒计时，开局瞬间分队并进出生点玻璃笼。
+            // 全部只补缺失键，服主自己写过的值不动。
+            if (!config.isSet("waiting.min-players")) {
+                config.set("waiting.min-players", 2);
+            }
+            if (!config.isSet("waiting.countdown-seconds")) {
+                config.set("waiting.countdown-seconds", 60);
+            }
+            if (!config.isSet("waiting.full-countdown-seconds")) {
+                config.set("waiting.full-countdown-seconds", 5);
+            }
+            if (!config.isSet("waiting.cage-hold-seconds")) {
+                config.set("waiting.cage-hold-seconds", 3);
+            }
+            if (!config.isSet("waiting.end-delay-seconds")) {
+                config.set("waiting.end-delay-seconds", 5);
+            }
+            if (!config.isSet("waiting.cage-material")) {
+                config.set("waiting.cage-material", "GLASS");
+            }
+            if (!config.isSet("waiting.pve-full-players")) {
+                config.set("waiting.pve-full-players", 0);
+            }
+            if (!config.isSet("waiting.void-y-offset")) {
+                config.set("waiting.void-y-offset", -10);
+            }
+            if (!config.isSet("waiting.protect")) {
+                config.set("waiting.protect", true);
+            }
+            notes.add("waiting: 新增等待区段（min-players=2 / countdown=30s / 满员 5s / "
+                    + "出生点玻璃笼 3s / 结算 5s）——匹配改为 BedWars 式：大厅匹配 → 房间等待区 → 倒计时开局");
         }
 
         config.set("config-version", CURRENT_VERSION);

@@ -8,6 +8,7 @@ import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.paper.match.ArenaManager;
 import com.taketori.kassen.paper.match.CuboidRegion;
 import com.taketori.kassen.paper.match.StatsTracker;
+import com.taketori.kassen.paper.match.room.GameRoom;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -65,19 +66,60 @@ public final class MatchCommand {
         }
         String action = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "status";
         switch (action) {
-            case "start" -> startMatch(sender, args.length > 2 && isForceFlag(args[2]));
-            case "force" -> startMatch(sender, true);
-            case "stop" -> {
-                String reason = args.length > 2 ? String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length)) : "管理员结束";
-                plugin.match().stop(reason);
-                send(sender, "<yellow>已结束对局。");
+            case "start" -> {
+                boolean force = false;
+                for (int i = 2; i < args.length; i++) {
+                    if (isForceFlag(args[i])) {
+                        force = true;
+                    }
+                }
+                startMatch(sender, resolveRoomArg(sender, args, 2), force);
             }
+            case "force" -> startMatch(sender, resolveRoomArg(sender, args, 2), true);
+            case "stop" -> stopMatch(sender, args);
             case "status" -> sendStatus(sender);
             case "mode" -> setMode(sender, args);
             case "difficulty", "diff" -> setDifficulty(sender, args);
-            default -> send(sender, "<gray>用法：/taketori match start [force] | force | stop | status"
-                    + " | mode <pvp|pve> | difficulty <easy|normal|hard>");
+            default -> send(sender, "<gray>用法：/taketori match start|force|stop [场地id] [原因/force]"
+                    + " | status | mode <pvp|pve> [场地id] | difficulty <easy|normal|hard>");
         }
+    }
+
+    /**
+     * 在参数里找一个真实存在的场地 id 作为目标房间；没写就回落
+     * 「执行者所在房 → default → 第一个房」。
+     */
+    private GameRoom resolveRoomArg(CommandSender sender, String[] args, int from) {
+        for (int i = from; i < args.length; i++) {
+            GameRoom explicit = plugin.rooms().room(args[i].toLowerCase(Locale.ROOT));
+            if (explicit != null) {
+                return explicit;
+            }
+        }
+        return resolveTargetRoom(sender instanceof Player player ? player : null);
+    }
+
+    /** /taketori match stop [场地id] [原因]：第一个参数若等于某场地 id 则作用该房，否则整串当原因。 */
+    private void stopMatch(CommandSender sender, String[] args) {
+        GameRoom target;
+        String reason;
+        if (args.length > 2 && plugin.rooms().room(args[2].toLowerCase(Locale.ROOT)) != null) {
+            target = plugin.rooms().room(args[2].toLowerCase(Locale.ROOT));
+            reason = args.length > 3
+                    ? String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length))
+                    : "管理员结束";
+        } else {
+            target = resolveTargetRoom(sender instanceof Player player ? player : null);
+            reason = args.length > 2
+                    ? String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length))
+                    : "管理员结束";
+        }
+        if (target == null) {
+            send(sender, "<red>没有可用房间。");
+            return;
+        }
+        target.stop(reason);
+        send(sender, "<yellow>已结束房间 " + target.display() + "。");
     }
 
     // ---------------------------------------------------------------- pve
@@ -120,45 +162,76 @@ public final class MatchCommand {
         send(sender, "<gray>据点耐久 <white>" + (int) pve.outpostHealth() + "</white>，月人每秒拆 <white>"
                 + pve.outpostDamagePerSecond() + "</white>，每波精英 <white>" + pve.elitesPerWave()
                 + "</white>，精英额外强化 <white>+" + pve.eliteBuffBonus() + "</white> 级。");
-        if (plugin.match().isRunning()) {
-            send(sender, "<yellow>当前这局仍在用开局时的设置，下一局才会变。");
+        boolean anyRunning = plugin.rooms().rooms().stream().anyMatch(GameRoom::isRunning);
+        if (anyRunning) {
+            send(sender, "<yellow>进行中的房间仍在用开局时的设置，下一轮开局才会变（等待区房间不受影响）。");
         }
     }
 
     private void sendPveStatus(CommandSender sender) {
         PveSettings pve = plugin.pveSettings();
-        var outpost = plugin.outpost();
-        send(sender, "<gold>===== PVE 设置 =====");
-        send(sender, "<gray>模式：<white>" + (plugin.match().isPve() ? "PVE" : "PVP（PVE 设置暂不生效）"));
+        send(sender, "<gold>===== PVE 设置（全局默认，各房间下一轮开局读取） =====");
+        var modes = plugin.rooms().rooms().stream()
+                .map(room -> room.id() + "=" + (room.isPve() ? "PVE" : "PVP"))
+                .reduce((a, b) -> a + " " + b);
+        send(sender, "<gray>各房间模式：<white>" + modes.orElse("无启用房间")
+                + " <dark_gray>（/taketori match mode <pvp|pve> [id] 单独切）");
         send(sender, "<gray>难度：<white>" + pve.difficultyDisplay() + "</white> <dark_gray>(" + pve.difficulty()
                 + "，/taketori pve difficulty 切换)");
         send(sender, "<gray>大波次：<white>"
                 + (pve.bigWavesEnabled() ? pve.bigWaveCount() + " 波" : "关闭")
                 + "</white> <gray>每波 <white>" + pve.elitesPerWave() + "</white> 精英，间隔 <white>"
-                + pve.bigWaveIntervalSeconds() + "</white> 秒，已进行 <white>"
-                + plugin.minions().bigWave() + "</white> 波");
+                + pve.bigWaveIntervalSeconds() + "</white> 秒");
+        send(sender, "<gray>各 PVE 房间已进行大波次：<white>"
+                + plugin.rooms().rooms().stream()
+                .filter(GameRoom::isPve)
+                .map(room -> room.id() + "=" + room.minions().bigWave())
+                .reduce((a, b) -> a + " " + b).orElse("无进行中的 PVE 房间"));
         send(sender, "<gray>精英随人数变强：<white>" + (pve.scalingEnabled()
                 ? "开（每多 1 人 +" + pve.buffsPerPlayer() + " 级，上限 " + pve.maxBuffAmplifier() + " 级）"
                 : "关"));
         if (!pve.outpostEnabled()) {
             send(sender, "<gray>保卫据点：<white>关闭 <dark_gray>(pve.outpost.enabled: false)");
-        } else if (outpost.isActive()) {
-            send(sender, "<gray>据点：<white>" + (int) Math.ceil(outpost.health()) + "/"
-                    + (int) outpost.maxHealth() + "</white> <gray>位置 " + describe(outpost.location())
-                    + " <dark_gray>(每秒被拆 "
-                    + String.format(Locale.ROOT, "%.0f", outpost.damagePerSecond()) + ")");
-        } else {
-            Location spot = plugin.arena().outpost();
-            send(sender, "<gray>据点：<white>未放置</white> <gray>预定位置 "
-                    + (spot == null ? "<red>未设置（用 /taketori arena setoutpost 划定）" : describe(spot)));
+            return;
+        }
+        // 逐房间列据点点位与当前血量（只列活动中的 PVE 房）
+        boolean any = false;
+        for (GameRoom room : plugin.rooms().rooms()) {
+            if (!room.isPve() || !room.isRunning()) {
+                continue;
+            }
+            any = true;
+            var outpost = room.outpost();
+            if (outpost.isActive()) {
+                send(sender, "<gray>[" + room.id() + "] 据点：<white>" + (int) Math.ceil(outpost.health()) + "/"
+                        + (int) outpost.maxHealth() + "</white> <gray>位置 " + describe(outpost.location())
+                        + " <dark_gray>(每秒被拆 "
+                        + String.format(Locale.ROOT, "%.0f", outpost.damagePerSecond()) + ")");
+            } else {
+                Location spot = room.arena().outpost();
+                send(sender, "<gray>[" + room.id() + "] 据点：<white>未放置</white> <gray>预定位置 "
+                        + (spot == null ? "<red>未设置（/taketori arena setoutpost 划定）" : describe(spot)));
+            }
+        }
+        if (!any) {
+            send(sender, "<gray>保卫据点：<white>开 <dark_gray>（当前没有进行中的 PVE 房间；点位在开局时按场地配置生成）");
         }
     }
 
-    /** /taketori match mode <pvp|pve>：切换对局模式并写回 config.yml。 */
+    /**
+     * /taketori match mode：列出各房间模式。
+     * /taketori match mode &lt;pvp|pve&gt; [场地id]：只切<b>目标房间</b>的模式（不写 id
+     * 取执行者所在房→default）；仅该房 WAITING 阶段允许，不影响其他房间，也不改全局配置。
+     */
     private void setMode(CommandSender sender, String[] args) {
         if (args.length < 3) {
-            send(sender, "<gray>当前模式：<white>" + (plugin.match().isPve() ? "pve" : "pvp")
-                    + "</white> <dark_gray>（用法：/taketori match mode <pvp|pve>）");
+            send(sender, "<gold>===== 各房间模式 =====");
+            for (GameRoom room : plugin.rooms().rooms()) {
+                send(sender, "<gray>[" + room.id() + "] <white>" + room.display()
+                        + " <gray>：<white>" + (room.isPve() ? "PVE" : "PVP")
+                        + " <dark_gray>（" + phaseText(room) + "）");
+            }
+            send(sender, "<gray>用法：/taketori match mode <pvp|pve> [场地id]（只改该房间，等待中可切）");
             return;
         }
         String mode = args[2].toLowerCase(Locale.ROOT);
@@ -166,13 +239,27 @@ public final class MatchCommand {
             send(sender, "<red>模式只能是 pvp 或 pve。");
             return;
         }
-        String error = plugin.match().setMode(mode);
+        GameRoom target;
+        if (args.length >= 4) {
+            target = plugin.rooms().room(args[3].toLowerCase(Locale.ROOT));
+            if (target == null) {
+                msg(sender, "room.arena-not-found", "id", args[3]);
+                return;
+            }
+        } else {
+            target = resolveTargetRoom(sender instanceof Player player ? player : null);
+            if (target == null) {
+                send(sender, "<red>没有可用房间。");
+                return;
+            }
+        }
+        String error = target.setMode(mode);
         if (error != null) {
-            send(sender, "<red>" + error);
+            send(sender, "<red>房间 " + target.display() + "：" + error);
             return;
         }
-        send(sender, "<green>已切换为 <white>" + mode.toUpperCase(Locale.ROOT)
-                + "</white> <gray>模式（已写入 config.yml，下一局生效）。");
+        send(sender, "<green>房间 <white>" + target.display() + "</white> 已切换为 <white>"
+                + mode.toUpperCase(Locale.ROOT) + "</white> <gray>模式（仅本房间，下一轮开局生效）。");
         if ("pve".equals(mode)) {
             send(sender, "<gray>PVE：所有人同一队打月人，不占点；友伤保护按 <white>auto</white> 会关闭。");
         } else {
@@ -185,52 +272,103 @@ public final class MatchCommand {
     }
 
     /**
-     * 开局。force = true 时先把大厅里的人拉进队列，再无视人数阈值直接开始
-     * （单人测试、人数差一个、有人掉线都能用）。
+     * 开局：作用于指定房间（命令里给 id），否则作用于"执行者所在房间 → default → 第一个房"。
+     * force = true 时无视双方人数校验，单人测试也能开（名单只取该房等待区的人，不再从大厅强拉）。
      */
-    private void startMatch(CommandSender sender, boolean force) {
-        Player starter = sender instanceof Player player ? player : null;
-        int pulled = 0;
-        if (force) {
-            pulled = plugin.lobby().pullLobbyPlayers();
+    private void startMatch(CommandSender sender, GameRoom target, boolean force) {
+        if (target == null) {
+            send(sender, "<red>没有可用房间：先创建并启用场地（<white>/taketori arena create <id></white>）。");
+            return;
         }
-        String error = plugin.match().start(starter, force);
+        String error = target.beginMatch(force);
         if (error != null) {
-            send(sender, "<red>无法开始：" + error);
+            send(sender, "<red>无法开始房间 " + target.display() + "：" + error);
             if (!force) {
-                send(sender, "<gray>人数不够也想开：<white>/taketori match force</white>"
-                        + " <dark_gray>（会把大厅里的人自动分队后开始）");
+                send(sender, "<gray>人数不够也想开：<white>/taketori match force " + target.id() + "</white>"
+                        + " <dark_gray>（等待区里有几人就按几人强制开局）");
             }
             return;
         }
-        send(sender, "<green>对局已开始。" + (force
-                ? " <gray>（强制开局，自动拉入 <white>" + pulled + "</white> 人）"
-                : ""));
+        send(sender, "<green>房间 <white>" + target.display() + "</white> 对局已开始。"
+                + (force ? " <gray>（强制开局）" : ""));
     }
 
-    private void sendStatus(CommandSender sender) {
-        var match = plugin.match();
-        send(sender, "<gold>===== 对局状态 =====");
-        send(sender, "<gray>阶段：<white>" + match.phase()
-                + "<gray>  剩余：<white>" + match.remainingText());
-        send(sender, "<gray>模式：<white>" + (match.isPve() ? "PVE（合作打月人）" : "PVP（红蓝对抗）")
-                + "<gray>  友伤保护：<white>" + (match.isFriendlyFireProtected() ? "开" : "关"));
-        send(sender, "<gray>比分：<red>" + match.teamScore(TeamId.RED)
-                + " <gray>: <blue>" + match.teamScore(TeamId.BLUE)
-                + " <gray>（目标 <white>" + match.rules().scoreToWin() + "<gray>）");
-        send(sender, "<gray>红队：<white>" + names(TeamId.RED));
-        send(sender, "<gray>蓝队：<white>" + names(TeamId.BLUE));
-        for (TeamId team : TeamId.values()) {
-            send(sender, "<gray>" + team.display() + " 基地：<white>已拆 "
-                    + plugin.baseCapture().capturedCount(team) + "/"
-                    + Math.max(1, plugin.arena().baseCount(team)));
+    /** 房间阶段中文显示。 */
+    private String phaseText(GameRoom room) {
+        return switch (room.phase()) {
+            case WAITING -> "等待中";
+            case STARTING -> "倒计时 " + room.countdownSeconds() + "s";
+            case CAGED -> "开局准备中";
+            case PLAYING -> "游戏中";
+            case ENDING -> "结算中";
+        };
+    }
+
+    /**
+     * 解析管理指令的目标房间：玩家优先取自己所在房间；
+     * 否则取 default 场地；再不行取第一个房间。控制台 / 无场地返回 null。
+     */
+    private GameRoom resolveTargetRoom(Player player) {
+        if (player != null) {
+            GameRoom current = plugin.rooms().roomOf(player);
+            if (current != null) {
+                return current;
+            }
         }
-        send(sender, "<gray>场上小怪：<white>" + plugin.minions().aliveCount()
-                + " <gray>最后得分：<white>" + match.nameOf(match.lastScorer())
-                + " <gray>(+" + match.lastScoreAmount() + " " + match.lastScoreReason() + ")");
-        send(sender, "<gray>队列：<white>" + plugin.lobby().queuedCount() + " 人"
+        GameRoom def = plugin.rooms().room(ArenaManager.DEFAULT_ARENA_ID);
+        if (def != null) {
+            return def;
+        }
+        List<GameRoom> all = plugin.rooms().rooms();
+        return all.isEmpty() ? null : all.get(0);
+    }
+
+    /** /taketori match status：逐房间列出阶段 / 模式 / 人数 / 比分 / 剩余时间。 */
+    private void sendStatus(CommandSender sender) {
+        List<GameRoom> rooms = plugin.rooms().rooms();
+        send(sender, "<gold>===== 对局状态（房间 " + rooms.size() + " 个）=====");
+        if (rooms.isEmpty()) {
+            send(sender, "<gray>还没有启用场地：<white>/taketori arena create <id> + enable</white>。");
+        }
+        int waitingTotal = 0;
+        for (GameRoom room : rooms) {
+            sendRoomStatus(sender, room);
+            waitingTotal += room.waitingCount();
+        }
+        send(sender, "<gray>等待区合计：<white>" + waitingTotal + " 人"
                 + " <gray>观众：<white>" + plugin.spectator().audienceCount() + " 人"
-                + " <dark_gray>（/taketori match force 可无视人数强制开局）");
+                + " <dark_gray>（开局：/taketori match start [场地id]；强制：force）");
+    }
+
+    /** 单个房间的状态块（多行）。 */
+    private void sendRoomStatus(CommandSender sender, GameRoom room) {
+        boolean live = room.phase() == GameRoom.Phase.CAGED
+                || room.phase() == GameRoom.Phase.PLAYING
+                || room.phase() == GameRoom.Phase.ENDING;
+        String ready = room.arena().isReady() ? "" : " <red>场地未就绪（" + room.arena().missingHint() + "）";
+        send(sender, "<gold>[" + room.id() + "] <white>" + room.display()
+                + " <gray>：<white>" + phaseText(room)
+                + (live ? "<gray> 剩余 <white>" + room.remainingText() : "")
+                + ready);
+        send(sender, "<dark_gray>  模式 <white>" + (room.isPve() ? "PVE（合作打月人）" : "PVP（红蓝对抗）")
+                + "<gray> 友伤保护 <white>" + (room.isFriendlyFireProtected() ? "开" : "关")
+                + "<gray> 人数 <white>" + (live ? room.onlineParticipantCount() : room.waitingCount())
+                + "/" + room.maxPlayers());
+        send(sender, "<dark_gray>  比分 <red>" + room.teamScore(TeamId.RED)
+                + " <gray>: <blue>" + room.teamScore(TeamId.BLUE)
+                + " <gray>（目标 <white>" + room.rules().scoreToWin() + "<gray>）");
+        send(sender, "<dark_gray>  红队：<white>" + names(room, TeamId.RED)
+                + " <dark_gray> 蓝队：<white>" + names(room, TeamId.BLUE));
+        if (live) {
+            for (TeamId team : TeamId.values()) {
+                send(sender, "<dark_gray>  " + team.display() + " 基地：已拆 <white>"
+                        + room.baseCapture().capturedCount(team) + "/"
+                        + Math.max(1, room.arena().baseCount(team)));
+            }
+            send(sender, "<dark_gray>  场上小怪：<white>" + room.minions().aliveCount()
+                    + " <gray>最后得分：<white>" + room.nameOf(room.lastScorer())
+                    + " <gray>(+" + room.lastScoreAmount() + " " + room.lastScoreReason() + ")");
+        }
     }
 
     /**
@@ -238,9 +376,9 @@ public final class MatchCommand {
      *
      * <ul>
      *   <li>观众 → 退出观战，回到大厅；</li>
-     *   <li>排队中 / 已分队但未开局 → 退出队列与队伍；</li>
+     *   <li>等待区（WAITING/STARTING）→ 退出房间、释放名额、回大厅；</li>
      *   <li>阵亡旁观 → 不动，等自动复活（否则会把对局流程搞乱）；</li>
-     *   <li>对局中的参赛者 → 拒绝，避免队伍人数被悄悄改掉。</li>
+     *   <li>CAGED/PLAYING 的参赛者 → 拒绝，避免队伍人数被悄悄改掉。</li>
      * </ul>
      */
     public void handleLeave(CommandSender sender) {
@@ -259,28 +397,12 @@ public final class MatchCommand {
             send(sender, "<gray>你正在等待复活（阵亡旁观），稍后会自动回到战场，不需要退出。");
             return;
         }
-        if (plugin.match().isRunning() && plugin.match().teamOf(player.getUniqueId()) != null) {
-            send(sender, "<red>对局进行中，参赛者不能单独退出。"
-                    + "<gray>要结束整局请找管理员执行 <white>/taketori match stop");
-            return;
-        }
-        boolean wasQueued = plugin.lobby().isQueued(player.getUniqueId());
-        TeamId team = plugin.match().teamOf(player.getUniqueId());
-        if (wasQueued) {
-            plugin.lobby().dequeue(player);
-        } else if (team != null) {
-            plugin.match().leave(player.getUniqueId());
-            send(sender, "<yellow>已离开 " + team.display() + "。");
-        } else {
-            send(sender, "<gray>你现在不在队列或队伍里。");
-        }
-        if (plugin.lobby().isConfigured()) {
-            plugin.lobby().sendToLobby(player);
-        }
+        // 等待中退出/对局中拒绝/无房间提示，文案与播报都在 LobbyManager 统一处理
+        plugin.lobby().returnToLobby(player);
     }
 
-    private String names(TeamId team) {
-        List<Player> players = plugin.match().teamPlayers(team);
+    private String names(GameRoom room, TeamId team) {
+        List<Player> players = room.teamPlayers(team);
         if (players.isEmpty()) {
             return "（空）";
         }
@@ -291,6 +413,10 @@ public final class MatchCommand {
 
     // ---------------------------------------------------------------- team
 
+    /**
+     * /taketori team &lt;玩家&gt; &lt;red|blue|none&gt;：作用于<b>目标玩家所在的房间</b>。
+     * 队伍在开局瞬间由等待名单自动均衡分配，所以这条指令主要用于开局后的人工调整。
+     */
     private void handleTeam(CommandSender sender, String[] args) {
         if (!require(sender, "taketori.admin")) {
             return;
@@ -304,9 +430,19 @@ public final class MatchCommand {
             send(sender, "<red>找不到玩家：" + args[1]);
             return;
         }
+        GameRoom room = plugin.rooms().roomOf(target);
+        if (room == null) {
+            send(sender, "<red>" + target.getName() + " 当前不在任何房间里"
+                    + "（让他先 /taketori lobby join 或从房间列表加入）。");
+            return;
+        }
         if ("none".equalsIgnoreCase(args[2]) || "leave".equalsIgnoreCase(args[2])) {
-            plugin.match().leave(target.getUniqueId());
-            send(sender, "<yellow>" + target.getName() + " 已退出队伍。");
+            // 管理员强制移出：走 RoomManager 解除唯一归属映射，再补放对局中的队伍槽位
+            // （rooms().leave 在对局中默认保留位置），最后送回大厅，避免结算时漏掉该玩家。
+            plugin.rooms().leave(target.getUniqueId());
+            room.leave(target.getUniqueId());
+            plugin.lobby().sendToLobby(target);
+            send(sender, "<yellow>" + target.getName() + " 已移出房间 " + room.display() + " 并送回大厅。");
             return;
         }
         TeamId team = TeamId.byName(args[2]);
@@ -314,9 +450,13 @@ public final class MatchCommand {
             send(sender, "<red>无效队伍，可选：red / blue / none");
             return;
         }
-        plugin.match().join(target, team);
-        send(sender, "<green>" + target.getName() + " 加入 " + team.display() + "。");
-        send(target, "<gold>你被分到 " + team.display() + " <gray>（记分板已显示双方比分）");
+        String error = room.chooseTeam(target, team);
+        if (error != null) {
+            send(sender, "<red>[" + room.id() + "] " + error);
+            return;
+        }
+        send(sender, "<green>[" + room.id() + "] " + target.getName() + " 加入 " + team.display() + "。");
+        send(target, "<gold>你被分到 " + team.display() + " <gray>（房间 " + room.display() + "，记分板已显示双方比分）");
     }
 
     // ---------------------------------------------------------------- arena
@@ -333,72 +473,209 @@ public final class MatchCommand {
             sendArenaUsage(sender);
             return;
         }
-        ArenaManager arena = plugin.arena();
-        switch (args[1].toLowerCase(Locale.ROOT)) {
+        ArenaManager arenaManager = plugin.arena();
+        String sub = args[1].toLowerCase(Locale.ROOT);
+
+        // ---- 不需要先选中场地的管理子命令 ----
+        switch (sub) {
+            case "create" -> {
+                if (args.length < 3) {
+                    send(sender, "<gray>用法：/taketori arena create <场地id>");
+                    return;
+                }
+                String id = args[2].toLowerCase(Locale.ROOT);
+                if (!ArenaManager.isValidId(id)) {
+                    msg(sender, "room.arena-bad-id");
+                    return;
+                }
+                if (arenaManager.exists(id)) {
+                    msg(sender, "room.arena-exists", "id", id);
+                    return;
+                }
+                arenaManager.create(id);
+                arenaManager.select(player.getUniqueId(), id);
+                arenaManager.save();
+                msg(sender, "room.arena-created", "id", id);
+                return;
+            }
+            case "select", "use" -> {
+                if (args.length < 3) {
+                    send(sender, "<gray>用法：/taketori arena select <场地id>");
+                    return;
+                }
+                String id = args[2].toLowerCase(Locale.ROOT);
+                if (!arenaManager.select(player.getUniqueId(), id)) {
+                    msg(sender, "room.arena-not-found", "id", id);
+                    return;
+                }
+                msg(sender, "room.arena-selected", "id", id);
+                return;
+            }
+            case "delete", "remove" -> {
+                if (args.length < 3) {
+                    send(sender, "<gray>用法：/taketori arena delete <场地id>");
+                    return;
+                }
+                String id = args[2].toLowerCase(Locale.ROOT);
+                if (!arenaManager.exists(id)) {
+                    msg(sender, "room.arena-not-found", "id", id);
+                    return;
+                }
+                // 运行中房间的删除拦截：RoomManager 在 Task 4 后接入（见 rooms().isBusy）
+                if (plugin.rooms() != null && plugin.rooms().isBusy(id)) {
+                    msg(sender, "room.arena-delete-busy", "id", id);
+                    return;
+                }
+                arenaManager.clearSelected(player.getUniqueId());
+                arenaManager.delete(id);
+                arenaManager.save();
+                msg(sender, "room.arena-deleted", "id", id);
+                return;
+            }
+            case "enable" -> {
+                if (args.length < 3) {
+                    send(sender, "<gray>用法：/taketori arena enable <场地id>");
+                    return;
+                }
+                String id = args[2].toLowerCase(Locale.ROOT);
+                com.taketori.kassen.paper.match.ArenaDef def = arenaManager.get(id);
+                if (def == null) {
+                    msg(sender, "room.arena-not-found", "id", id);
+                    return;
+                }
+                def.setEnabled(true);
+                arenaManager.save();
+                msg(sender, "room.arena-enabled", "id", id);
+                return;
+            }
+            case "disable" -> {
+                if (args.length < 3) {
+                    send(sender, "<gray>用法：/taketori arena disable <场地id>");
+                    return;
+                }
+                String id = args[2].toLowerCase(Locale.ROOT);
+                com.taketori.kassen.paper.match.ArenaDef def = arenaManager.get(id);
+                if (def == null) {
+                    msg(sender, "room.arena-not-found", "id", id);
+                    return;
+                }
+                def.setEnabled(false);
+                arenaManager.save();
+                msg(sender, "room.arena-disabled", "id", id);
+                return;
+            }
+            case "list", "ls" -> {
+                listArenas(sender);
+                return;
+            }
             case "pos1" -> {
-                arena.setPos1(player.getUniqueId(), player.getLocation());
+                arenaManager.setPos1(player.getUniqueId(), player.getLocation());
                 send(sender, "<green>角点 1 已设置：" + describe(player.getLocation()));
+                return;
             }
             case "pos2" -> {
-                arena.setPos2(player.getUniqueId(), player.getLocation());
+                arenaManager.setPos2(player.getUniqueId(), player.getLocation());
                 send(sender, "<green>角点 2 已设置：" + describe(player.getLocation()));
+                return;
             }
+            case "clearselection" -> {
+                arenaManager.clearSelection(player.getUniqueId());
+                send(sender, "<green>已清空你的选区。"
+                        + " <gray>（" + arenaManager.selectionStatus(player.getUniqueId()) + "）");
+                return;
+            }
+            case "wand" -> {
+                plugin.setupWand().wand().give(player);
+                return;
+            }
+            case "lootwand" -> {
+                plugin.setupWand().wand().giveLoot(player);
+                return;
+            }
+            default -> {
+                // 下面所有写场地数据的子命令都需要先选中场地
+            }
+        }
+
+        // ---- 需要选中场地的数据子命令 ----
+        com.taketori.kassen.paper.match.ArenaDef def = arenaManager.selected(player.getUniqueId());
+        if (def == null) {
+            msg(sender, "room.arena-not-selected");
+            return;
+        }
+        switch (sub) {
             case "setminion" -> {
-                CuboidRegion selection = arena.selection(player.getUniqueId());
+                CuboidRegion selection = arenaManager.selection(player.getUniqueId());
                 if (selection == null) {
-                    send(sender, "<red>选区不完整：<white>" + arena.selectionStatus(player.getUniqueId()));
+                    send(sender, "<red>选区不完整：<white>" + arenaManager.selectionStatus(player.getUniqueId()));
                     send(sender, "<gray>站在一角 → <white>/taketori arena pos1</white>；走到对角 → <white>/taketori arena pos2</white>；再执行本条指令。");
                     return;
                 }
-                int index = args.length >= 3 ? BaseArgParser.parseIndex(args[2]) : arena.nextFreeMinionIndex();
+                // 参数宽容：setminion / setminion 2 / setminion mixed / setminion 2 mixed 都可用
+                int index = def.nextFreeMinionIndex();
+                String kind = null;
+                if (args.length >= 3) {
+                    if (isRegionKind(args[2])) {
+                        kind = args[2];
+                    } else {
+                        index = BaseArgParser.parseIndex(args[2]);
+                        if (args.length >= 4) {
+                            kind = args[3];
+                        }
+                    }
+                }
                 if (index <= 0) {
                     send(sender, "<red>编号无效，或已经配满 32 个刷新区（可显式指定编号覆盖）。");
                     return;
                 }
-                arena.setMinionRegion(index, selection);
-                arena.save();
-                arena.clearSelection(player.getUniqueId());
-                send(sender, "<green>月人刷新区 #" + index + " 已设置：" + selection.describe());
-                send(sender, "<dark_gray>当前共 " + arena.minionRegionCount() + " 个刷新区，月人会在其中随机分布。");
+                if (kind != null && !isRegionKind(kind)) {
+                    send(sender, "<red>刷新区标签只能是 <white>normal</white>（只刷普通月人）或 <white>mixed</white>（普通+精英）。");
+                    return;
+                }
+                def.setMinionRegion(index, selection, kind);
+                arenaManager.save();
+                arenaManager.clearSelection(player.getUniqueId());
+                send(sender, "<green>[" + def.id() + "] 月人刷新区 #" + index + "（" + def.minionRegionKind(index)
+                        + "）已设置：" + selection.describe());
+                send(sender, "<dark_gray>当前共 " + def.minionRegionCount() + " 个刷新区（mixed "
+                        + def.mixedMinionRegionCount() + " 个）；普通月人在全部区之间轮转均分，精英只在 mixed 区刷新。"
+                        + "标签可在 arenas.yml 的 minion-regions.<编号>.kind 修改。");
             }
             case "setloot" -> {
-                CuboidRegion selection = arena.selection(player.getUniqueId());
+                CuboidRegion selection = arenaManager.selection(player.getUniqueId());
                 if (selection == null) {
-                    send(sender, "<red>选区不完整：<white>" + arena.selectionStatus(player.getUniqueId()));
+                    send(sender, "<red>选区不完整：<white>" + arenaManager.selectionStatus(player.getUniqueId()));
                     send(sender, "<gray>用「道具点工具」点两个角，或 pos1 / pos2 之后再执行。");
                     return;
                 }
-                int index = args.length >= 3 ? BaseArgParser.parseIndex(args[2]) : arena.nextFreeLootIndex();
+                int index = args.length >= 3 ? BaseArgParser.parseIndex(args[2]) : def.nextFreeLootIndex();
                 if (index <= 0) {
                     send(sender, "<red>编号无效，或已经配满 32 个道具点（可显式指定编号覆盖）。");
                     return;
                 }
-                arena.setLootRegion(index, selection);
-                arena.save();
-                arena.clearSelection(player.getUniqueId());
-                send(sender, "<green>道具刷新点 #" + index + " 已设置：" + selection.describe());
-                send(sender, "<dark_gray>当前共 " + arena.lootRegionCount()
+                def.setLootRegion(index, selection);
+                arenaManager.save();
+                arenaManager.clearSelection(player.getUniqueId());
+                send(sender, "<green>[" + def.id() + "] 道具刷新点 #" + index + " 已设置：" + selection.describe());
+                send(sender, "<dark_gray>当前共 " + def.lootRegionCount()
                         + " 个道具点；刷新池在 config.yml 的 loot 段（可填原版物品或插件武器）。");
             }
-            case "lootwand" -> {
-                plugin.setupWand().wand().giveLoot(player);
-            }
             case "setoutpost", "setpost", "setoutpostpos" -> {
-                CuboidRegion selection = arena.selection(player.getUniqueId());
+                CuboidRegion selection = arenaManager.selection(player.getUniqueId());
                 Location spot = selection == null ? player.getLocation() : selection.center();
-                arena.setOutpost(spot);
-                arena.save();
-                arena.clearSelection(player.getUniqueId());
-                send(sender, "<green>PVE 据点位置已设为：" + describe(spot)
+                def.setOutpost(spot);
+                arenaManager.save();
+                arenaManager.clearSelection(player.getUniqueId());
+                send(sender, "<green>[" + def.id() + "] PVE 据点位置已设为：" + describe(spot)
                         + (selection == null ? " <dark_gray>(没选区，直接取你站的位置)" : " <dark_gray>(选区中心)"));
                 send(sender, "<gray>据点是一个取消移动 AI 的雪傀儡，月人进入 <white>"
                         + (int) plugin.pveSettings().outpostRadius()
                         + "</white> 格内就会拆它；耐久与难度在 config.yml 的 <white>pve</white> 段。");
             }
             case "deloutpost", "delpost" -> {
-                arena.clearOutpost();
-                arena.save();
-                send(sender, "<green>已清除据点位置。");
+                def.clearOutpost();
+                arenaManager.save();
+                send(sender, "<green>已清除 [" + def.id() + "] 的据点位置。");
                 send(sender, "<gray>PVE 时会回落到第一个月人刷新区的中心。");
             }
             // ---- 删除已划定的区域（管理员菜单「删除已划区域」里的按钮执行的就是这几条）----
@@ -416,13 +693,13 @@ public final class MatchCommand {
                             + "（也接受 红 / 蓝），编号写正整数（全角数字会自动转换）。");
                     return;
                 }
-                if (!arena.clearBase(team, index)) {
-                    send(sender, "<red>" + team.display() + " 没有编号 #" + index + " 的基地"
+                if (!def.clearBase(team, index)) {
+                    send(sender, "<red>[" + def.id() + "] " + team.display() + " 没有编号 #" + index + " 的基地"
                             + " <dark_gray>（用 /taketori arena list 看现有编号）");
                     return;
                 }
-                arena.save();
-                send(sender, "<green>已删除 " + team.display() + " 基地 #" + index + "。");
+                arenaManager.save();
+                send(sender, "<green>已删除 [" + def.id() + "] " + team.display() + " 基地 #" + index + "。");
                 send(sender, "<gray>别忘了补划：<white>/taketori arena setbase " + team.key()
                         + " " + index + "</white>（基地数量不足时无法开局）。");
             }
@@ -436,13 +713,13 @@ public final class MatchCommand {
                     send(sender, "<red>编号无效：要写正整数（全角数字会自动转换）。");
                     return;
                 }
-                if (!arena.clearMinionRegion(index)) {
-                    send(sender, "<red>没有编号 #" + index + " 的月人刷新区。");
+                if (!def.clearMinionRegion(index)) {
+                    send(sender, "<red>[" + def.id() + "] 没有编号 #" + index + " 的月人刷新区。");
                     return;
                 }
-                arena.save();
-                send(sender, "<green>已删除月人刷新区 #" + index + "。"
-                        + " <gray>当前还剩 <white>" + arena.minionRegionCount() + "</white> 个。");
+                arenaManager.save();
+                send(sender, "<green>已删除 [" + def.id() + "] 月人刷新区 #" + index + "。"
+                        + " <gray>当前还剩 <white>" + def.minionRegionCount() + "</white> 个。");
             }
             case "delloot" -> {
                 if (args.length < 3) {
@@ -454,26 +731,21 @@ public final class MatchCommand {
                     send(sender, "<red>编号无效：要写正整数（全角数字会自动转换）。");
                     return;
                 }
-                if (!arena.clearLootRegion(index)) {
-                    send(sender, "<red>没有编号 #" + index + " 的道具刷新点。");
+                if (!def.clearLootRegion(index)) {
+                    send(sender, "<red>[" + def.id() + "] 没有编号 #" + index + " 的道具刷新点。");
                     return;
                 }
-                arena.save();
-                send(sender, "<green>已删除道具刷新点 #" + index + "。"
-                        + " <gray>当前还剩 <white>" + arena.lootRegionCount() + "</white> 个。");
-            }
-            case "clearselection" -> {
-                arena.clearSelection(player.getUniqueId());
-                send(sender, "<green>已清空你的选区。"
-                        + " <gray>（" + arena.selectionStatus(player.getUniqueId()) + "）");
+                arenaManager.save();
+                send(sender, "<green>已删除 [" + def.id() + "] 道具刷新点 #" + index + "。"
+                        + " <gray>当前还剩 <white>" + def.lootRegionCount() + "</white> 个。");
             }
             case "setbase" -> {
                 if (args.length < 3) {
-                    send(sender, "<gray>用法：/taketori arena setbase <red|blue> [编号 1-" + arena.baseIndexCeiling()
+                    send(sender, "<gray>用法：/taketori arena setbase <red|blue> [编号 1-" + def.baseIndexCeiling()
                             + "]");
                     send(sender, "<dark_gray>  省略编号时会自动用该队下一个空位；队伍可写 red / blue，也可写 红 / 蓝。");
                     send(sender, "<dark_gray>  每队基地数量在 config.yml 的 <white>base.count-per-team</white>"
-                            + "（正整数或 auto，当前：" + (arena.baseCountAuto() ? "auto" : arena.baseLimit()) + "）。");
+                            + "（正整数或 auto，当前：" + (def.baseLimit() == 0 ? "auto" : def.baseLimit()) + "）。");
                     return;
                 }
                 String first = args[2];
@@ -493,37 +765,37 @@ public final class MatchCommand {
                 }
                 if (second != null && index <= 0) {
                     send(sender, "<red>编号无效：<white>" + second + "</white> <gray>—— 编号要写 <white>1~"
-                            + arena.baseIndexCeiling() + "</white> 的数字（全角数字会自动转换）。");
+                            + def.baseIndexCeiling() + "</white> 的数字（全角数字会自动转换）。");
                     return;
                 }
                 if (index <= 0) {
-                    index = arena.nextFreeBaseIndex(team);
+                    index = def.nextFreeBaseIndex(team);
                     if (index <= 0) {
-                        send(sender, "<red>" + team.display() + " 的 " + arena.baseLimit()
+                        send(sender, "<red>" + team.display() + " 的 " + def.baseLimit()
                                 + " 个基地都已配置；要覆盖请写明编号，例如 <white>/taketori arena setbase "
                                 + team.key() + " 1");
                         return;
                     }
                     send(sender, "<gray>未指定编号，自动使用 " + team.display() + " 基地 #" + index + "。");
                 }
-                if (index > arena.baseIndexCeiling()) {
+                if (index > def.baseIndexCeiling()) {
                     send(sender, "<red>编号 " + index + " 超出范围：当前每队可用 <white>"
-                            + arena.baseIndexCeiling() + "</white> 个编号（1~"
-                            + arena.baseIndexCeiling() + "）。");
+                            + def.baseIndexCeiling() + "</white> 个编号（1~"
+                            + def.baseIndexCeiling() + "）。");
                     send(sender, "<gray>要配更多基地，把 config.yml 的 <white>base.count-per-team</white> 调大"
                             + "（或写 <white>auto</white> 不设上限），再 /taketori reload。");
                     return;
                 }
-                CuboidRegion selection = arena.selection(player.getUniqueId());
+                CuboidRegion selection = arenaManager.selection(player.getUniqueId());
                 if (selection == null) {
-                    send(sender, "<red>选区不完整：<white>" + arena.selectionStatus(player.getUniqueId()));
+                    send(sender, "<red>选区不完整：<white>" + arenaManager.selectionStatus(player.getUniqueId()));
                     send(sender, "<gray>站在一角 → <white>/taketori arena pos1</white>；走到对角 → <white>/taketori arena pos2</white>；再执行本条指令。");
                     return;
                 }
-                arena.setBase(team, index, selection);
-                arena.save();
-                arena.clearSelection(player.getUniqueId());
-                send(sender, "<green>已设置 " + team.display() + " 基地 #" + index + "：" + selection.describe());
+                def.setBase(team, index, selection);
+                arenaManager.save();
+                arenaManager.clearSelection(player.getUniqueId());
+                send(sender, "<green>已设置 [" + def.id() + "] " + team.display() + " 基地 #" + index + "：" + selection.describe());
                 send(sender, "<dark_gray>选区已清空，划下一个基地请重新 pos1 + pos2。");
             }
             case "setspawn" -> {
@@ -537,67 +809,88 @@ public final class MatchCommand {
                             + "</white> <gray>—— 可选 <white>red</white> / <white>blue</white>（也接受 红 / 蓝）");
                     return;
                 }
-                arena.setSpawn(team, player.getLocation());
-                arena.save();
-                send(sender, "<green>已设置 " + team.display() + " 出生点：" + describe(player.getLocation()));
+                def.setSpawn(team, player.getLocation());
+                arenaManager.save();
+                send(sender, "<green>已设置 [" + def.id() + "] " + team.display() + " 出生点：" + describe(player.getLocation()));
             }
-            case "wand" -> {
-                plugin.setupWand().wand().give(player);
-            }
-            case "list" -> {
-                send(sender, "<gold>===== 场地配置 =====");
-                if (arena.minionRegionCount() == 0) {
-                    send(sender, "<gray>月人刷新区：<white>未设置");
-                } else {
-                    send(sender, "<gray>月人刷新区：<white>" + arena.minionRegionCount() + " 个");
-                    arena.minionRegions().forEach((index, region) ->
-                            send(sender, "<dark_gray>  #" + index + " " + region.describe()));
-                }
-                if (arena.lootRegionCount() == 0) {
-                    send(sender, "<dark_gray>道具刷新点：未设置（可选，用 /taketori arena setloot 添加）");
-                } else {
-                    send(sender, "<gray>道具刷新点：<white>" + arena.lootRegionCount() + " 个");
-                    arena.lootRegions().forEach((index, region) ->
-                            send(sender, "<dark_gray>  #" + index + " " + region.describe()));
-                }
-                for (TeamId team : TeamId.values()) {
-                    send(sender, "<gray>" + team.display() + " 出生点：<white>"
-                            + (arena.spawn(team) == null ? "未设置" : describe(arena.spawn(team))));
-                    send(sender, "<gray>" + team.display() + " 基地：<white>" + arena.baseCount(team)
-                            + " 个 <dark_gray>（每队数量由 base.count-per-team 决定，当前："
-                            + (arena.baseCountAuto() ? "auto（以实际划定为定）" : arena.baseLimit() + " 个") + "）");
-                    for (int i = 1; i <= arena.baseIndexCeiling(); i++) {
-                        CuboidRegion base = arena.base(team, i);
-                        if (base != null) {
-                            send(sender, "<dark_gray>  #" + i + " " + base.describe());
-                        }
-                    }
-                }
-                send(sender, "<gray>PVE 据点：<white>"
-                        + (arena.hasOutpost() ? describe(arena.outpost())
-                        : "未设置" + " <dark_gray>（回落：第一个月人刷新区中心；用 /taketori arena setoutpost 划定）"));
-                send(sender, "<gray>是否可开局：<white>" + (arena.isReady() ? "是" : "否（还缺：" + arena.missingHint() + "）"));
+            case "setwait", "setwaiting" -> {
+                def.setWaitSpawn(player.getLocation());
+                arenaManager.save();
+                msg(sender, "room.arena-wait-set", "id", def.id());
             }
             default -> sendArenaUsage(sender);
         }
     }
 
+    /** 月人刷新区标签解析（normal / mixed，大小写不敏感）。 */
+    private boolean isRegionKind(String text) {
+        return com.taketori.kassen.paper.match.ArenaDef.REGION_KIND_NORMAL.equalsIgnoreCase(text)
+                || com.taketori.kassen.paper.match.ArenaDef.REGION_KIND_MIXED.equalsIgnoreCase(text);
+    }
+
+    /** arena list：逐场地输出启用状态、就绪情况与各要素数量。 */
+    private void listArenas(CommandSender sender) {
+        var arenas = plugin.arena().all();
+        send(sender, "<gold>===== 场地列表（" + arenas.size() + "）=====");
+        if (arenas.isEmpty()) {
+            send(sender, "<gray>还没有场地：<white>/taketori arena create <id></white> 创建第一个。");
+            return;
+        }
+        for (var entry : arenas.entrySet()) {
+            var def = entry.getValue();
+            String state = def.enabled()
+                    ? (def.isReady() ? "<green>就绪·开放" : "<yellow>未就绪·开放")
+                    : "<dark_gray>已关闭";
+            send(sender, "<gold>[" + def.id() + "] " + state);
+            send(sender, "<dark_gray>  刷新区 <white>" + def.minionRegionCount()
+                    + "</white>（mixed <white>" + def.mixedMinionRegionCount() + "</white>）"
+                    + " / 道具点 <white>" + def.lootRegionCount()
+                    + "</white> / 基地 <red>" + def.baseCount(TeamId.RED)
+                    + "</red>:<blue>" + def.baseCount(TeamId.BLUE)
+                    + "</blue> / 出生点 <white>"
+                    + (def.spawn(TeamId.RED) != null ? "红" : "")
+                    + (def.spawn(TeamId.BLUE) != null ? "蓝" : "")
+                    + "</white> / 等待点 <white>" + (def.hasWaitSpawn() ? "已设" : "未设")
+                    + "</white> / 据点 <white>" + (def.hasOutpost() ? "已设" : "回落"));
+            if (def.hasMinionSpawnSettings()) {
+                var cfg = plugin.getConfig();
+                send(sender, "<dark_gray>  本场地刷新节奏：<white>"
+                        + def.minionSpawnIntervalSeconds(Math.max(1, cfg.getInt("minion.interval-seconds", 9)))
+                        + "</white> 秒/波 × <white>"
+                        + def.minionSpawnPerSpawn(Math.max(1, cfg.getInt("minion.per-spawn", 3)))
+                        + "</white> 只，上限 <white>"
+                        + def.minionSpawnMaxAlive(Math.max(1, cfg.getInt("minion.max-alive", 15)))
+                        + "</white> <dark_gray>（arenas.yml minion-spawn 覆盖，未写的项用全局默认）");
+            }
+            if (!def.isReady()) {
+                send(sender, "<yellow>  还缺：<white>" + def.missingHint());
+            }
+        }
+        send(sender, "<gray>当前选中：<white>" + (sender instanceof Player p
+                ? String.valueOf(plugin.arena().selectedId(p.getUniqueId())) : "-"));
+    }
+
+    /** 用 messages.yml 的 room.* 键发消息。 */
+    private void msg(CommandSender sender, String key, Object... placeholders) {
+        sender.sendMessage(plugin.config().messages().get(key, placeholders));
+    }
+
     private void sendArenaUsage(CommandSender sender) {
-        send(sender, "<yellow>场地指令：");
+        send(sender, "<yellow>场地指令（多场地；set*/del* 作用于当前选中的场地）：");
+        send(sender, "<gray>/taketori arena create <id>  <dark_gray>— 新建场地并自动选中");
+        send(sender, "<gray>/taketori arena select <id>  <dark_gray>— 切换当前操作的场地");
+        send(sender, "<gray>/taketori arena list  <dark_gray>— 全部场地的就绪情况");
+        send(sender, "<gray>/taketori arena enable|disable|delete <id>");
         send(sender, "<gray>/taketori arena pos1 | pos2  <dark_gray>— 用当前位置设置选区角点");
-        send(sender, "<gray>/taketori arena setminion [编号]  <dark_gray>— 选区设为月人刷新区（可配多个）");
-        send(sender, "<gray>/taketori arena setbase <red|blue> [编号 1-" + plugin.arena().baseIndexCeiling()
-                + "]  <dark_gray>— 编号可省略（自动用下一个空位）；每队数量见 config.yml 的 base.count-per-team");
-        send(sender, "<gray>/taketori arena setloot [编号]  <dark_gray>— 选区设为道具刷新点（config.yml 的 loot 段配刷新池）");
-        send(sender, "<gray>/taketori arena setoutpost  <dark_gray>— 选区中心（或你站的位置）设为 PVE 保卫据点");
-        send(sender, "<gray>/taketori arena deloutpost  <dark_gray>— 清除据点位置");
-        send(sender, "<gray>/taketori arena delbase <red|blue> <编号> | delminion <编号> | delloot <编号>"
-                + "  <dark_gray>— 删除已划定的区域（也可在 /taketori admin 里点按钮删）");
-        send(sender, "<gray>/taketori arena clearselection  <dark_gray>— 清空你当前的选区（pos1 / pos2）");
+        send(sender, "<gray>/taketori arena setminion [编号] [normal|mixed]  <dark_gray>— 选区设为月人刷新区（normal 只刷普通，mixed 普通+精英；月人按区轮转均分）");
+        send(sender, "<gray>/taketori arena setbase <red|blue> [编号 1-3]  <dark_gray>— 编号可省略（自动用下一个空位）");
+        send(sender, "<gray>/taketori arena setloot [编号]  <dark_gray>— 选区设为道具刷新点");
+        send(sender, "<gray>/taketori arena setoutpost  <dark_gray>— 选区中心（或站位）设为 PVE 据点");
+        send(sender, "<gray>/taketori arena setwait  <dark_gray>— 当前位置设为中立等待出生点（匹配后在此集结）");
         send(sender, "<gray>/taketori arena setspawn <red|blue>");
-        send(sender, "<gray>/taketori arena wand  <dark_gray>— 领选区锄（左键 = 角点 1，右键 = 角点 2）");
-        send(sender, "<gray>/taketori arena lootwand  <dark_gray>— 领道具点工具（第二种选区工具，划道具刷新点用）");
-        send(sender, "<gray>/taketori arena list");
+        send(sender, "<gray>/taketori arena deloutpost | delbase <red|blue> <编号> | delminion <编号> | delloot <编号>");
+        send(sender, "<gray>/taketori arena clearselection  <dark_gray>— 清空你当前的选区（pos1 / pos2）");
+        send(sender, "<gray>/taketori arena wand | lootwand  <dark_gray>— 领选区锄 / 道具点工具");
     }
 
     private String describe(org.bukkit.Location location) {
@@ -622,27 +915,34 @@ public final class MatchCommand {
         switch (action) {
             case "join" -> {
                 if (sender instanceof Player player) {
-                    lobby.queue(player);
+                    lobby.quickJoin(player);
                 } else {
                     send(sender, "<red>该操作需要玩家执行。");
                 }
                 return;
             }
             case "leave" -> {
-                if (sender instanceof Player player) {
-                    plugin.lobby().dequeue(player);
-                    // 是观众就走观众退出（会清掉观众标记）；否则按普通旁观恢复
-                    if (!plugin.spectator().leaveAudience(player)) {
-                        plugin.spectator().leave(player, lobby.spawn());
-                    }
-                } else {
-                    send(sender, "<red>该操作需要玩家执行。");
-                }
+                // 与 /taketori leave 完全同义：观众退出 / 等待区退房回大厅 / 对局中拒绝
+                handleLeave(sender);
                 return;
             }
             case "spectate" -> {
                 if (sender instanceof Player player) {
-                    plugin.spectator().enterAudience(player);
+                    if (plugin.spectator().isAudience(player)) {
+                        plugin.spectator().leaveAudience(player);
+                        return;
+                    }
+                    var live = plugin.rooms().rooms().stream()
+                            .filter(room -> room.phase() == GameRoom.Phase.CAGED
+                                    || room.phase() == GameRoom.Phase.PLAYING)
+                            .findFirst().orElse(null);
+                    if (live == null) {
+                        send(sender, "<red>当前没有进行中的对局，无法旁观。");
+                        return;
+                    }
+                    plugin.spectator().enterAudience(player, live.spectatorViewPoint(), live);
+                    player.sendMessage(plugin.config().messages().get("room.spectating",
+                            "room", live.display()));
                 } else {
                     send(sender, "<red>该操作需要玩家执行。");
                 }
@@ -727,8 +1027,10 @@ public final class MatchCommand {
                             ? " <red>(动作无法识别)"
                             : " <gray>（" + signAction.description() + "）"));
                 });
-                send(sender, "<gray>当前队列：<white>" + lobby.queuedCount() + " 人"
-                        + " <gray>（阈值 " + plugin.config().lobbyAutoStartPlayers() + " 自动开局）");
+                int waitingTotal = plugin.rooms().rooms().stream()
+                        .mapToInt(GameRoom::waitingCount).sum();
+                send(sender, "<gray>房间等待区合计：<white>" + waitingTotal + " 人"
+                        + " <dark_gray>（人数达标由房间自动倒计时开局）");
                 send(sender, "<gray>是否可用：<white>" + (lobby.isConfigured() ? "是" : "否（先设置出生点）"));
             }
             default -> {

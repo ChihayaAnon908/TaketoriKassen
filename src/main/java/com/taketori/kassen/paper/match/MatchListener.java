@@ -3,6 +3,7 @@ package com.taketori.kassen.paper.match;
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.match.MatchRules;
 import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.paper.match.room.GameRoom;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -20,6 +21,11 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 /**
  * 对局相关的事件监听：击杀计分、死亡旁观、复活、退出清理。
  *
+ * <p>多房间化后所有判定都经 {@link com.taketori.kassen.paper.match.room.RoomManager}
+ * 路由：玩家事件取 {@code roomOf(player)}，月人事件取 {@code roomOfEntity(entity)}，
+ * 无房间归属一律不碰；复活延时回调会再次校验"仍是同一房间且仍在战斗中"，
+ * 防止两轮对局之间串台。</p>
+ *
  * <p>死亡流程（需求：死亡旁观）：</p>
  * <ol>
  *   <li>死亡时按规则计分、保留物品；</li>
@@ -36,28 +42,33 @@ public final class MatchListener implements Listener {
         this.plugin = plugin;
     }
 
-    /** 小怪被玩家击杀 → 按配置加分。 */
+    /** 小怪被玩家击杀 → 按实体所属房间计分（月人归属在刷怪器，天然按房间隔离）。 */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMinionDeath(EntityDeathEvent event) {
         LivingEntity entity = event.getEntity();
         if (!(entity instanceof org.bukkit.entity.Zombie)) {
             return;
         }
-        if (!plugin.minions().isMinion(entity)) {
+        GameRoom room = plugin.rooms().roomOfEntity(entity);
+        if (room == null) {
             return;
         }
-        plugin.minions().onMinionDeath(entity);
+        room.minions().onMinionDeath(entity);
 
         Player killer = entity.getKiller();
-        if (killer == null || !plugin.match().isRunning()) {
+        if (killer == null || !room.isRunning()) {
             return;
         }
-        MatchRules rules = plugin.match().rules();
-        plugin.match().addScore(killer, rules.minionKillScore(), "击杀月人");
-        plugin.match().addMinionKill(killer);                                        // 本局计数（记分板）
+        // 击杀者必须仍在该房间的战斗中（防止跨房/收尾瞬间误计分）
+        if (plugin.rooms().roomOf(killer) != room) {
+            return;
+        }
+        MatchRules rules = room.rules();
+        room.addScore(killer, rules.minionKillScore(), "击杀月人");
+        room.addMinionKill(killer);                                                  // 本局计数（记分板）
         plugin.stats().add(killer.getName(), StatsTracker.Stat.MINION_KILLS, 1L);     // 跨局累计
         double healed = healOnKill(killer, rules.minionKillHeal());
-        plugin.matchBoard().actionBar(killer, "<green>+<white>" + rules.minionKillScore()
+        room.scoreboard().actionBar(killer, "<green>+<white>" + rules.minionKillScore()
                 + " <gray>击杀月人" + healText(healed));
     }
 
@@ -65,11 +76,12 @@ public final class MatchListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player victim = event.getEntity();
-        MatchRules rules = plugin.match().rules();
-
-        if (!plugin.match().isRunning()) {
+        GameRoom room = plugin.rooms().roomOf(victim);
+        if (room == null || !room.isRunning()) {
             return;
         }
+        MatchRules rules = room.rules();
+
         if (rules.keepInventory()) {
             event.setKeepInventory(true);
             event.getDrops().clear();
@@ -80,20 +92,20 @@ public final class MatchListener implements Listener {
         plugin.stats().add(victim.getName(), StatsTracker.Stat.DEATHS, 1L);
 
         Player killer = victim.getKiller();
-        if (killer != null) {
-            TeamId victimTeam = plugin.match().teamOf(victim.getUniqueId());
-            TeamId killerTeam = plugin.match().teamOf(killer.getUniqueId());
+        if (killer != null && plugin.rooms().roomOf(killer) == room) {
+            TeamId victimTeam = room.teamOf(victim.getUniqueId());
+            TeamId killerTeam = room.teamOf(killer.getUniqueId());
             if (killerTeam != null && victimTeam != null && killerTeam != victimTeam) {
-                plugin.match().addScore(killer, rules.playerKillScore(), "击杀 " + victim.getName());
-                plugin.match().addPlayerKill(killer);
+                room.addScore(killer, rules.playerKillScore(), "击杀 " + victim.getName());
+                room.addPlayerKill(killer);
                 plugin.stats().add(killer.getName(), StatsTracker.Stat.KILLS, 1L);
                 // 击杀回血（需求）：满血时不回、也不刷提示
                 double healed = healOnKill(killer, rules.playerKillHeal());
-                plugin.matchBoard().actionBar(killer, "<green>+<white>" + rules.playerKillScore()
+                room.scoreboard().actionBar(killer, "<green>+<white>" + rules.playerKillScore()
                         + " <gray>击杀 " + victim.getName() + healText(healed));
                 if (plugin.config().debug()) {
-                    plugin.getLogger().info("[match] " + killer.getName() + " 击杀 " + victim.getName()
-                            + "，回血 " + healed + " 点");
+                    plugin.getLogger().info("[room " + room.id() + "] " + killer.getName() + " 击杀 "
+                            + victim.getName() + "，回血 " + healed + " 点");
                 }
             }
         }
@@ -108,49 +120,56 @@ public final class MatchListener implements Listener {
         }, 1L);
     }
 
-    /** 重生：先进入死亡旁观，倒计时结束后复活到己方出生点。 */
+    /** 重生：先进入死亡旁观，倒计时结束后复活到己方出生点（全部按死亡时所在房间结算）。 */
     @EventHandler(priority = EventPriority.NORMAL)
     public void onRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
-        if (!plugin.match().isRunning()) {
+        GameRoom room = plugin.rooms().roomOf(player);
+        if (room == null || !room.isRunning()) {
             return;
         }
-        TeamId team = plugin.match().teamOf(player.getUniqueId());
+        TeamId team = room.teamOf(player.getUniqueId());
         if (team == null) {
             return;
         }
-        Location spawn = plugin.arena().spawn(team);
+        Location spawn = room.arena().spawn(team);
         if (spawn != null) {
             event.setRespawnLocation(spawn);
         }
 
-        // 观战视角：优先看中央刷怪区（战场热点）
-        Location viewPoint = null;
-        if (plugin.arena().minionRegion() != null) {
-            viewPoint = plugin.arena().minionRegion().center();
-        }
+        // 观战视角：优先看该房间中央刷怪区（战场热点）
+        Location viewPoint = room.spectatorViewPoint();
         plugin.spectator().enterTemporary(player, viewPoint);
 
-        int delay = Math.max(1, plugin.match().rules().respawnDelaySeconds()) * 20;
+        // 复活倒计时 BossBar：与 respawn-delay 同步，复活瞬间由 spectator().leave() 撤除
+        plugin.spectator().startRespawnCountdown(player, Math.max(1, room.rules().respawnDelaySeconds()));
+
+        int delay = Math.max(1, room.rules().respawnDelaySeconds()) * 20;
         String name = player.getName();
+        // 捕获死亡时的房间实例：回调时必须还是同一房间、仍在战斗、队伍未变，否则送去大厅
+        final GameRoom deathRoom = room;
+        final TeamId deathTeam = team;
         plugin.scheduler().runLater(() -> {
             Player target = plugin.getServer().getPlayerExact(name);
             if (target == null || !target.isOnline()) {
                 return;
             }
-            if (!plugin.match().isRunning()) {
+            GameRoom current = plugin.rooms().roomOf(target);
+            if (current != deathRoom || !deathRoom.isRunning()
+                    || deathRoom.teamOf(target.getUniqueId()) != deathTeam) {
+                // 对局已结束/房间已重置/玩家已不在原队伍：离开旁观回大厅
                 plugin.spectator().leave(target, plugin.lobby().spawn());
                 return;
             }
             plugin.spectator().leave(target, spawn);
-            plugin.matchBoard().showTo(target);
-            plugin.match().applySpawnBuff(target);   // 复活后的出生增益
-            plugin.matchBoard().actionBar(target, "<green>已复活，返回战场！");
+            deathRoom.scoreboard().showTo(target);
+            deathRoom.applySpawnBuff(target);   // 复活后的出生增益
+            deathRoom.scoreboard().actionBar(target, "<green>已复活，返回战场！");
         }, delay);
     }
 
     /**
-     * 友伤保护：**同一队**的玩家互相不造成伤害（近战、箭矢、技能弹体都算）。
+     * 友伤保护：**同一房间同一队**的玩家互相不造成伤害（近战、箭矢、技能弹体都算）。
      *
      * <p>是否生效看 <code>combat.friendly-fire-protection</code>：
      * 默认 <code>auto</code> = <b>PVP 开启、PVE 关闭</b>；
@@ -158,24 +177,29 @@ public final class MatchListener implements Listener {
      */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onFriendlyFire(EntityDamageByEntityEvent event) {
-        if (!plugin.match().isRunning() || !plugin.match().isFriendlyFireProtected()) {
+        if (!(event.getEntity() instanceof Player victim)) {
             return;
         }
-        if (!(event.getEntity() instanceof Player victim)) {
+        GameRoom room = plugin.rooms().roomOf(victim);
+        if (room == null || !room.isRunning() || !room.isFriendlyFireProtected()) {
             return;
         }
         Player attacker = attackerOf(event.getDamager());
         if (attacker == null || attacker.equals(victim)) {
             return;   // 自伤（技能反噬之类）不拦
         }
-        TeamId attackerTeam = plugin.match().teamOf(attacker.getUniqueId());
-        TeamId victimTeam = plugin.match().teamOf(victim.getUniqueId());
+        // 攻击者必须在同一房间；跨房物理接触（理论上传送隔离不会发生）不拦截
+        if (plugin.rooms().roomOf(attacker) != room) {
+            return;
+        }
+        TeamId attackerTeam = room.teamOf(attacker.getUniqueId());
+        TeamId victimTeam = room.teamOf(victim.getUniqueId());
         if (attackerTeam == null || victimTeam == null || attackerTeam != victimTeam) {
             return;   // 不同队、或有人不在比赛里 → 正常结算
         }
         event.setCancelled(true);
         if (plugin.config().debug()) {
-            plugin.getLogger().info("[match] 友伤保护：已取消 " + attacker.getName()
+            plugin.getLogger().info("[room " + room.id() + "] 友伤保护：已取消 " + attacker.getName()
                     + " 对队友 " + victim.getName() + " 的伤害");
         }
     }
@@ -190,13 +214,18 @@ public final class MatchListener implements Listener {
         return null;
     }
 
-    /** 玩家退出：撤掉记分板；对局中的队伍保留（回来还能继续）。 */
+    /**
+     * 玩家退出：经 RoomManager 解除房间映射。等待/倒计时阶段立即释放名额
+     * （下一 tick 房间倒计时自动重算/取消）；CAGED/PLAYING 保留队伍位置只撤记分板。
+     */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        plugin.matchBoard().hide(player);
-        if (plugin.config().debug() && plugin.match().isRunning()) {
-            plugin.getLogger().info("[match] " + player.getName() + " 退出对局（队伍保留）");
+        plugin.spectator().forgetQuietly(player.getUniqueId());
+        GameRoom room = plugin.rooms().leave(player.getUniqueId());
+        if (room != null && plugin.config().debug() && room.isRunning()) {
+            plugin.getLogger().info("[room " + room.id() + "] " + player.getName()
+                    + " 退出对局（队伍保留）");
         }
     }
 

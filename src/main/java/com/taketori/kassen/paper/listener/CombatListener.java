@@ -393,10 +393,14 @@ public final class CombatListener implements Listener {
         }
         Entity shooter = arrow.getShooter() instanceof Entity entity ? entity : null;
         if (victim instanceof Player other && shooter instanceof Player owner && !other.equals(owner)) {
-            var shooterTeam = plugin.match().teamOf(owner.getUniqueId());
-            var victimTeam = plugin.match().teamOf(other.getUniqueId());
-            if (shooterTeam != null && shooterTeam == victimTeam) {
-                return;
+            // 多房间：两人必须在同一房间，队友才免疫减益
+            var victimRoom = plugin.rooms().roomOf(other);
+            if (victimRoom != null && victimRoom == plugin.rooms().roomOf(owner)) {
+                var shooterTeam = victimRoom.teamOf(owner.getUniqueId());
+                var victimTeam = victimRoom.teamOf(other.getUniqueId());
+                if (shooterTeam != null && shooterTeam == victimTeam) {
+                    return;
+                }
             }
         }
         Double chance = pdc.get(PDCKeys.arrowDebuffChance(), PersistentDataType.DOUBLE);

@@ -1,8 +1,13 @@
 # ---- 构建产物 ----
 build/
 out/
+bin/
 *.class
 *.log
+
+# ---- 本地工具（不入库） ----
+.mimosa/
+.zcodeignore
 
 # ---- 本地依赖 jar（离线构建用，不入库） ----
 libs/

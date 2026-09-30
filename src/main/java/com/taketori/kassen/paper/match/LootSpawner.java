@@ -1,6 +1,7 @@
 package com.taketori.kassen.paper.match;
 
 import com.taketori.kassen.TaketoriPlugin;
+import com.taketori.kassen.paper.match.room.GameRoom;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -48,6 +49,8 @@ public final class LootSpawner {
     private record Entry(ItemStack stack, int weight, String label) {
     }
 
+    /** 所属房间：场地刷新区与对局阶段按房间取。 */
+    private final GameRoom room;
     private final TaketoriPlugin plugin;
     /** 本插件刷出的掉落物（对局结束时清理）。 */
     private final Set<UUID> drops = ConcurrentHashMap.newKeySet();
@@ -58,8 +61,9 @@ public final class LootSpawner {
     private int despawnSeconds;
     private List<Entry> pool = List.of();
 
-    public LootSpawner(TaketoriPlugin plugin) {
-        this.plugin = plugin;
+    public LootSpawner(GameRoom room) {
+        this.room = room;
+        this.plugin = room.plugin();
     }
 
     /** 重读配置（启动与 /taketori reload）。 */
@@ -107,7 +111,7 @@ public final class LootSpawner {
     /** 对局开始时调用。 */
     public void start() {
         stop();
-        if (!enabled || pool.isEmpty() || plugin.arena().lootRegionCount() == 0) {
+        if (!enabled || pool.isEmpty() || room.arena().lootRegionCount() == 0) {
             return;
         }
         long interval = intervalSeconds * 20L;
@@ -137,24 +141,24 @@ public final class LootSpawner {
     }
 
     private void tick() {
-        if (!plugin.match().isRunning()) {
+        if (!room.isRunning()) {
             return;
         }
-        int room = maxDrops - dropCount();
-        if (room <= 0) {
+        int slots = maxDrops - dropCount();
+        if (slots <= 0) {
             return;
         }
-        List<CuboidRegion> regions = new ArrayList<>(plugin.arena().lootRegions().values());
+        List<CuboidRegion> regions = new ArrayList<>(room.arena().lootRegions().values());
         if (regions.isEmpty()) {
             return;
         }
         // 每个刷新点尝试刷一个，直到用完额度
         for (CuboidRegion region : regions) {
-            if (room <= 0) {
+            if (slots <= 0) {
                 break;
             }
             if (spawnOne(region)) {
-                room--;
+                slots--;
             }
         }
     }

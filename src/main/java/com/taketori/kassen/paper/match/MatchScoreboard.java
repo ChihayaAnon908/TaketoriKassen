@@ -3,6 +3,7 @@ package com.taketori.kassen.paper.match;
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.match.PveSettings;
 import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.paper.match.room.GameRoom;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -37,12 +38,15 @@ public final class MatchScoreboard {
     /** PVE：据点耐久百分比（0-100）。 */
     private static final String LINE_OUTPOST = "据点(%)";
 
+    /** 所属房间：比分/阶段/波次/据点全部按房间取。 */
+    private final GameRoom room;
     private final TaketoriPlugin plugin;
     private final Map<UUID, Scoreboard> boards = new HashMap<>();
     private final Map<UUID, Objective> objectives = new HashMap<>();
 
-    public MatchScoreboard(TaketoriPlugin plugin) {
-        this.plugin = plugin;
+    public MatchScoreboard(GameRoom room) {
+        this.room = room;
+        this.plugin = room.plugin();
     }
 
     public void showTo(Player player) {
@@ -102,7 +106,7 @@ public final class MatchScoreboard {
         if (objective == null) {
             return;
         }
-        var match = plugin.match();
+        var match = room;
         long minutes = (match.remainingMillis() + 59_999L) / 60_000L;
 
         // 清掉旧条目，避免分数变化后残留旧行
@@ -117,7 +121,7 @@ public final class MatchScoreboard {
             objective.getScore(LINE_TOTAL).setScore(match.teamScore(TeamId.RED));
             objective.getScore(LINE_SEPARATOR).setScore(999);
             // 保卫据点：显示耐久百分比（据点被拆掉就直接判负，所以放在显眼的位置）
-            OutpostManager outpost = plugin.outpost();
+            OutpostManager outpost = room.outpost();
             if (outpost.isActive()) {
                 objective.getScore(LINE_OUTPOST).setScore((int) Math.round(outpost.healthRatio() * 100.0D));
             }
@@ -126,9 +130,9 @@ public final class MatchScoreboard {
             // 大波次：显示"当前 / 总数"，让玩家知道还剩几波
             PveSettings pve = plugin.pveSettings();
             if (pve.bigWavesEnabled() && pve.bigWaveCount() > 0) {
-                objective.getScore("大波次/" + pve.bigWaveCount()).setScore(plugin.minions().bigWave());
+                objective.getScore("大波次/" + pve.bigWaveCount()).setScore(room.minions().bigWave());
             }
-            objective.getScore(LINE_WAVE).setScore(plugin.minions().wave());
+            objective.getScore(LINE_WAVE).setScore(room.minions().wave());
             objective.getScore(LINE_TIME).setScore((int) Math.min(999, minutes));
             return;
         }
@@ -139,7 +143,7 @@ public final class MatchScoreboard {
         objective.getScore(LINE_SEPARATOR).setScore(999);
         objective.getScore(LINE_MINE).setScore(match.playerScore(player.getUniqueId()));
         objective.getScore(LINE_KILLS).setScore(match.totalKillsOf(player.getUniqueId()));
-        objective.getScore(LINE_WAVE).setScore(plugin.minions().wave());
+        objective.getScore(LINE_WAVE).setScore(room.minions().wave());
         objective.getScore(LINE_TIME).setScore((int) Math.min(999, minutes));
     }
 

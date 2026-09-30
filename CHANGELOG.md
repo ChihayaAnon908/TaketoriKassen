@@ -5,6 +5,82 @@
 
 ---
 
+## 1.1.1 — 均等刷新、刷新区标签与复活倒计时
+
+### 玩法层
+
+- **月人按区轮转均等刷新**：普通月人、精英波与 PVE 大波次从"每只随机挑刷新区"改为
+  "按区顺序轮转"——多区时各区间刷新数量长期严格均等（如 2 区 × 每波 3 只 → 区1、区2、区1 交替）；
+- **死亡复活倒计时 BossBar**：阵亡旁观期间屏幕上方显示"复活倒计时 N 秒"进度条
+  （随 `match.respawn-delay-seconds` 每秒递减），复活 / 退出 / 结算收尾自动撤除；
+- **月人刷新区两种标签**（同一条 `setminion` 指令注册，标签可在 arenas.yml 修改）：
+  `normal` = 只刷新普通月人；`mixed` = 普通 + 精英（旧配置无标签的区域默认 mixed，行为不变）。
+  精英月人与 PVE 大波次只在 mixed 区轮转刷新，全部区都是 normal 时跳过精英并在开局告警一次。
+
+### 管理
+
+- `/taketori arena setminion [编号] [normal|mixed]`；`arena list` 显示各区标签分布
+  （mixed 数量）与场地级刷新节奏覆盖。
+
+### 配置
+
+- `arenas.yml` 新增两个可选段（旧文件无需改动，缺省行为与之前一致）：
+  - `minion-regions.<编号>.kind`：刷新区标签（normal / mixed）；
+  - `minion-spawn`：`interval-seconds` / `per-spawn` / `max-alive`，按场地覆盖
+    config.yml 的 `minion.*` 全局默认值。
+- 多世界（Multiverse 等）支持复核：坐标全部按世界名存储与解析、无 World 对象缓存、
+  播报与进服接管按世界判定——兼容良好；注意对局进行中先 `/taketori match stop` 再卸载地图世界。
+
+### 修复
+
+- **内存泄漏**：`SchedulerAdapter` 的任务句柄集合此前只增不减——一次性任务执行完不出列、
+  被调用方自行 `cancel()` 的周期任务句柄残留，长期运行集合随死亡 / 开菜单 / 技能使用无限增长，
+  并连带钉住闭包捕获的对象；现在一次性任务执行后自动出列，并新增看门任务（每分钟）剔除已取消的句柄；
+- 对局中断线玩家的背包暂存（`offlineBackups`）新增 48 小时淘汰：玩家不再回归时不再一直持有整套装备快照；
+- 武器编辑会话在玩家退出服务器时立即清理（原先只在本玩家再次交互时惰性过期）。
+
+---
+
+## 1.1.0 — BedWars 式多房间匹配
+
+**目标环境**：Paper **1.21.4**（Java 21），`api-version: 1.21.4`（不变）。
+
+### 玩法层：匹配模型重做
+
+- **多场地多房间并发**：一个服务器可配置多个场地（`arenas.yml`，旧 `arena.yml` 首次启动自动迁移为
+  `default` 场地，旧文件保留），每个启用的场地对应一个可反复开局的房间
+  （`WAITING → STARTING → CAGED → PLAYING → ENDING` 循环），多房间同时处于不同阶段互不干扰；
+- **匹配流程改为**：大厅「快速加入」（自动进入等待人数最多的房间）或**房间列表 GUI**（实时显示
+  各房模式/阶段/倒计时/人数，等待房可加入、进行中房可旁观）→ 传送到场地中立等待出生点
+  （免伤、禁破坏、掉虚空自动拉回）→ 人数达 `waiting.min-players` 开始倒计时
+  （默认 60 秒，满员切 5 秒，掉人取消，Actionbar 逐秒提示）→ 开局瞬间均衡分队 →
+  传送进出生点**玻璃笼**短暂冻结（默认 3 秒，材质可配）→ 解笼开战 → 结算停留几秒后
+  在线者回大厅，房间重置立即可再匹配；
+- **对局区四周自动立屏障墙**（从世界最低到最高的 BARRIER），防外人闯入、防玩家跑出，
+  对局区域内禁止破坏/放置；开局背包整体备份、结算原样返还，对局中断线的背包转全局暂存、
+  重连自动返还；
+- **对局中参赛者不能中途退出**（`/taketori leave`、告示牌、菜单统一拒绝），等待区可自由退房换房。
+
+### 管理与隔离
+
+- **对局指令全部支持按场地 id 定向**：`/taketori match start|force|stop|mode [场地id]`，
+  `status` 逐房间列出阶段/模式/人数/比分/剩余时间；切 PVP/PVE 只改本房间规则快照，不再写全局 config；
+- **场地管理子命令扩充**：`/taketori arena create|select|delete|enable|disable|setwait|delminion|
+  delloot|deloutpost|delbase` 等，全部作用于管理员当前选中的场地；管理员菜单新增
+  房间选择页与单房间控制页；
+- **多房间隔离**：击杀计分校验凶手与被杀者同房、月人按生成房间归属、结算只清**本场地区域内**
+  的掉落物与技能弹体（同世界多场地不再互相误删）、观众按房间旁观与清理、房间播报限定在场地世界；
+- 月人刷新区支持配多个，每只月人随机分散出现。
+
+### 配置
+
+- `config.yml` 新增 `waiting:` 段（min-players / countdown-seconds / full-countdown-seconds /
+  cage-hold-seconds / end-delay-seconds / cage-material / pve-full-players / void-y-offset / protect），
+  `config-version` 升到 8，旧配置启动时自动补齐；
+- `messages.yml` 新增 `room:` 消息段（匹配进出、倒计时、房间列表、场地管理提示）。
+
+---
+
 ## 1.0.0 — 首个正式版
 
 **目标环境**：Paper **1.21.4**（Java 21），`api-version: 1.21.4`。

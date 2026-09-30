@@ -61,6 +61,16 @@ public final class ProjectileListener implements Listener {
                 if (!(nearby instanceof LivingEntity living) || nearby.equals(shooter) || living.isDead()) {
                     continue;
                 }
+                // 等待区/玻璃笼保护期玩家：伤害事件会被取消，连燃烧/减速/击退等直接效果也一并跳过
+                // （笼保护无条件生效；等待区保护跟随 waiting.protect 开关，与 WaitingListener 一致）
+                if (living instanceof Player protectedPlayer) {
+                    var protectedRoom = plugin.rooms().roomOf(protectedPlayer);
+                    if (protectedRoom != null && (protectedRoom.isCaged(protectedPlayer.getUniqueId())
+                            || (plugin.config().waitingProtect()
+                            && protectedRoom.isProtected(protectedPlayer.getUniqueId())))) {
+                        continue;
+                    }
+                }
                 // 镜面反射：被打的人正处于反射窗口 → 不结算伤害，改为把弹体弹回去
                 if (nearby instanceof Player victim && !victim.equals(shooter) && shooter != null) {
                     CombatStates.Reflection reflection = plugin.states().reflection(victim.getUniqueId());

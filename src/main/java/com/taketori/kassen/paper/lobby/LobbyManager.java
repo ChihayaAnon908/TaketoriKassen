@@ -1,9 +1,10 @@
 package com.taketori.kassen.paper.lobby;
 
 import com.taketori.kassen.TaketoriPlugin;
-import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.core.worlds.WorldScope;
 import com.taketori.kassen.paper.match.CuboidRegion;
+import com.taketori.kassen.paper.match.room.GameRoom;
+import com.taketori.kassen.paper.match.room.RoomManager;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -12,25 +13,21 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.potion.PotionEffect;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 
 /**
- * 大厅：玩家集结点、加入队列的入口、角色选择与告示牌注册。
+ * 大厅（Hub）：玩家集结点、快速匹配的入口、角色选择与告示牌注册。
  *
- * <p>流程：玩家进服（可选）传送到大厅 → 点「加入对局」告示牌 → <b>随机分队</b>并进入队列
- * → 人数达到阈值自动开局或管理员手动开局 → 开局时统一传送到各自出生点。</p>
- *
- * <p>所有状态都可通过 {@link #queue(Player)}、{@link #dequeue(Player)} 等公开方法调用，
- * 其他插件不必依赖告示牌也能驱动同一套流程（预留接口）。</p>
+ * <p>BedWars 式流程：玩家进服传送到大厅 → 点「加入对局」告示牌 / 菜单按钮 /
+ * 指令发起 {@link #quickJoin} → 自动进入人最多的等待房间（等待区可退出、可换房）
+ * → 房间自己倒计时、开局分队、结算后把人送回大厅。大厅不再维护队列与提前分队，
+ * "玩家属于哪个房间"的唯一权威在 {@link RoomManager}。</p>
  */
 public final class LobbyManager {
 
@@ -42,9 +39,6 @@ public final class LobbyManager {
     private CuboidRegion region;
     private Location spawn;
     private final List<LobbySign> signs = new CopyOnWriteArrayList<>();
-    private final Set<UUID> queued = ConcurrentHashMap.newKeySet();
-
-    private BukkitTask autoStartTask;
 
     public LobbyManager(TaketoriPlugin plugin) {
         this.plugin = plugin;
@@ -169,105 +163,86 @@ public final class LobbyManager {
         return signs.removeIf(sign -> sign.matches(block));
     }
 
-    // ---------------------------------------------------------------- 队列
-
-    public boolean isQueued(UUID uuid) {
-        return queued.contains(uuid);
-    }
-
-    public int queuedCount() {
-        return queued.size();
-    }
-
-    public Set<UUID> queuedView() {
-        return Set.copyOf(queued);
-    }
+    // ---------------------------------------------------------------- 快速加入 / 离开房间
 
     /**
-     * 加入对局队列：随机分队（人数少的一队优先，人数相同随机）。
-     * 返回分配到的队伍；无法加入（对局已开始 / 已满）时返回 null。
+     * 快速加入：告示牌 {@code join} / 玩家菜单匹配按钮 / {@code /taketori lobby join}
+     * 的<b>唯一入口</b>。自动进入等待人数最多的可加入房间；加入/失败文案与房间播报统一处理。
      */
-    public TeamId queue(Player player) {
+    public void quickJoin(Player player) {
         if (player == null || !player.isOnline()) {
-            return null;
-        }
-        if (plugin.match().isRunning() && plugin.match().teamOf(player.getUniqueId()) == null) {
-            send(player, "<red>对局已经开始，无法中途加入。<gray>可以点「旁观」告示牌观看。");
-            return null;
-        }
-        TeamId existing = plugin.match().teamOf(player.getUniqueId());
-        TeamId team = existing != null ? existing : plugin.match().joinRandom(player);
-        if (team == null) {
-            send(player, "<red>队伍已满，无法加入。");
-            return null;
-        }
-        queued.add(player.getUniqueId());
-        send(player, "<green>已加入对局队列，你被分到 " + team.display() + " <gray>（等待开局…）");
-        broadcastLobby("<gray>" + player.getName() + " 加入队列（" + team.display() + "）<dark_gray>当前 "
-                + queued.size() + " 人");
-        checkAutoStart();
-        return team;
-    }
-
-    /** 退出队列并离开队伍。 */
-    public void dequeue(Player player) {
-        if (player == null) {
             return;
         }
-        queued.remove(player.getUniqueId());
-        plugin.match().leave(player.getUniqueId());
-        send(player, "<yellow>已退出对局队列。");
+        handleJoinResult(player, plugin.rooms().quickJoin(player), null);
     }
 
-    public void clearQueue() {
-        queued.clear();
-    }
-
-    /** 队列人数达到配置阈值时自动开局。 */
-    private void checkAutoStart() {
-        int threshold = plugin.config().lobbyAutoStartPlayers();
-        if (threshold <= 0 || plugin.match().isRunning() || queued.size() < threshold) {
+    /** 加入指定房间（房间列表 GUI / 管理指令用）；等待中允许自动换房。 */
+    public void joinRoom(Player player, String roomId) {
+        if (player == null || !player.isOnline()) {
             return;
         }
-        String error = plugin.match().start(null);
-        if (error != null) {
-            // 排队的人在大厅世界，所以这条走大厅播报（别用对局播报，否则他们在别的世界会收不到）
-            broadcastLobby("<red>自动开局失败：" + error);
+        handleJoinResult(player, plugin.rooms().joinRoom(player, roomId), roomId);
+    }
+
+    private void handleJoinResult(Player player, RoomManager.JoinResult result, String requestedId) {
+        GameRoom room = result.room();
+        switch (result.outcome()) {
+            case SUCCESS -> {
+                message(player, "room.join-success", "room", room.display());
+                room.broadcastMessage("room.join-broadcast", "player", player.getName(),
+                        "count", room.waitingCount(), "max", room.maxPlayers());
+            }
+            case SWITCHED -> {
+                message(player, "room.switch-room", "room", room.display());
+                room.broadcastMessage("room.join-broadcast", "player", player.getName(),
+                        "count", room.waitingCount(), "max", room.maxPlayers());
+            }
+            case ALREADY_IN, IN_GAME -> message(player, "room.already-in", "room", room.display());
+            case FULL -> message(player, "room.room-full", "room", room.display());
+            case STARTED -> message(player, "room.room-started");
+            case NOT_READY -> message(player, "room.list-not-ready",
+                    "missing", room == null ? "" : room.arena().missingHint());
+            case NOT_FOUND -> message(player, "room.arena-not-found",
+                    "id", requestedId == null ? "?" : requestedId);
+            case NO_ROOM -> message(player, "room.no-room");
         }
     }
 
     /**
-     * 强制开局用：把"已在大厅范围内"或"已排队"但还没分队的玩家随机分队并加入队列。
-     *
-     * <p>注意只在配了大厅区域（<code>/taketori lobby setregion</code>）时才能识别
-     * "人在大厅"，否则只处理已经点过告示牌排队的人。</p>
-     *
-     * @return 被拉进来的人数
+     * 主动离开房间回大厅（{@code /taketori leave}、告示牌 leave、菜单按钮的统一入口）：
+     * <ul>
+     *   <li>WAITING/STARTING：释放等待名额（房间倒计时自动重算），房间内播报，传送回大厅；</li>
+     *   <li>CAGED/PLAYING 的参赛者：拒绝中途退出（要结束整局找管理员 stop）；</li>
+     *   <li>ENDING / 无房间：直接送大厅。</li>
+     * </ul>
+     * 观众身份请先由 SpectatorManager.leaveAudience 处理（指令里在本方法之前判断）。
      */
-    public int pullLobbyPlayers() {
-        int pulled = 0;
-        int maxPerTeam = Math.max(1, plugin.config().matchTeamSize());
-        for (Player player : plugin.getServer().getOnlinePlayers()) {
-            UUID uuid = player.getUniqueId();
-            if (plugin.match().teamOf(uuid) != null) {
-                continue;   // 已经分好队了
-            }
-            if (plugin.spectator().isSpectator(player)) {
-                continue;   // 观众不拉
-            }
-            if (!queued.contains(uuid) && !isInLobby(player)) {
-                continue;   // 既没排队也不在大厅里：不动他
-            }
-            TeamId team = plugin.match().joinRandom(player);
-            if (team == null) {
-                send(player, "<red>队伍已满（每队上限 " + maxPerTeam + " 人），本局无法加入。");
-                continue;
-            }
-            queued.add(uuid);
-            send(player, "<green>管理员开始了对局，你被分到 " + team.display() + "。");
-            pulled++;
+    public void returnToLobby(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
         }
-        return pulled;
+        GameRoom room = plugin.rooms().roomOf(player);
+        if (room == null) {
+            message(player, "room.not-in-room");
+            sendToLobby(player);
+            return;
+        }
+        if ((room.phase() == GameRoom.Phase.CAGED || room.phase() == GameRoom.Phase.PLAYING)
+                && room.teamOf(player.getUniqueId()) != null) {
+            player.sendMessage(MINI.deserialize("<red>对局进行中，参赛者不能单独退出。"
+                    + "<gray>要结束整局请找管理员执行 <white>/taketori match stop"));
+            return;
+        }
+        boolean waitingRoom = room.phase() == GameRoom.Phase.WAITING
+                || room.phase() == GameRoom.Phase.STARTING;
+        String name = player.getName();
+        plugin.rooms().leave(player.getUniqueId());
+        if (waitingRoom) {
+            room.broadcastMessage("room.leave-broadcast", "player", name,
+                    "count", room.waitingCount(), "max", room.maxPlayers());
+        }
+        message(player, "room.leave");
+        sendToLobby(player);
     }
 
     // ---------------------------------------------------------------- 播报
@@ -308,7 +283,16 @@ public final class LobbyManager {
         if (player.getGameMode() == GameMode.SPECTATOR) {
             player.setGameMode(GameMode.SURVIVAL);
         }
-        plugin.matchBoard().hide(player);
+        // 回大厅：按所属房间（参赛者或观众）找到对应房间记分板并隐藏；都没有就直接还原主记分板
+        var room = plugin.rooms().roomOf(player);
+        if (room == null) {
+            room = plugin.spectator().audienceRoom(player.getUniqueId());
+        }
+        if (room != null) {
+            room.scoreboard().hide(player);
+        } else if (player.isOnline()) {
+            player.setScoreboard(org.bukkit.Bukkit.getScoreboardManager().getMainScoreboard());
+        }
     }
 
     /** 清掉药水效果与技能相关状态（进大厅 / 出对局时用）。 */
@@ -328,7 +312,8 @@ public final class LobbyManager {
         return region.contains(player.getLocation());
     }
 
-    private void send(Player player, String miniMessage) {
-        player.sendMessage(MINI.deserialize(miniMessage));
+    /** 发送一条 messages.yml 文案（占位符按 key/value 成对传入）。 */
+    private void message(Player player, String key, Object... placeholders) {
+        player.sendMessage(plugin.config().messages().get(key, placeholders));
     }
 }

@@ -77,22 +77,37 @@ public final class PlayerMenu implements Listener {
                 MINI.deserialize("<dark_gray>竹取合战 <dark_gray>· <white>玩家菜单"));
         holder.bind(inventory);
 
-        boolean queued = plugin.lobby().isQueued(player.getUniqueId());
-        TeamId team = plugin.match().teamOf(player.getUniqueId());
+        var joinedRoom = plugin.rooms().roomOf(player);
+        boolean inWaitingRoom = joinedRoom != null
+                && (joinedRoom.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.WAITING
+                || joinedRoom.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.STARTING);
+        boolean inLiveRoom = joinedRoom != null && !inWaitingRoom;
+        TeamId team = joinedRoom == null ? null : joinedRoom.teamOf(player.getUniqueId());
         var profile = plugin.config().characters().profile(player.getUniqueId());
         String character = profile.hasCharacter() ? profile.characterId() : "未选择";
 
-        inventory.setItem(10, button(queued ? Material.RED_DYE : Material.COMPASS,
-                queued ? "<yellow>退出对局队列" : "<green>加入对局（匹配）",
-                queued ? "<gray>你已在队列中，当前被分到 <white>" + (team == null ? "?" : team.display())
-                        : "<gray>自动随机分队并进入队列",
-                queued ? "<dark_gray>再点一次即退出队列" : "<dark_gray>人数达到阈值会自动开局",
+        inventory.setItem(10, button(inWaitingRoom ? Material.RED_DYE : Material.COMPASS,
+                inWaitingRoom ? "<yellow>离开等待区（回大厅）"
+                        : (inLiveRoom ? "<gray>对局进行中" : "<green>快速加入对局"),
+                inWaitingRoom
+                        ? "<gray>房间 <white>" + joinedRoom.display()
+                                + " <gray>等待中 <white>(" + joinedRoom.waitingCount()
+                                + "/" + joinedRoom.maxPlayers() + ")"
+                        : (inLiveRoom
+                                ? "<gray>你已在房间 <white>" + joinedRoom.display()
+                                        + " <gray>中，参赛者不能中途退出"
+                                : "<gray>自动加入等待人数最多的房间"),
+                inWaitingRoom ? "<dark_gray>再点一次即退出房间、返回大厅"
+                        : (inLiveRoom ? "<dark_gray>要结束整局请联系管理员"
+                                : "<dark_gray>人数达标自动倒计时开局"),
                 "<dark_gray>与点「加入对局」告示牌等价"));
 
         inventory.setItem(12, button(Material.SHIELD, "<white>队伍选择",
                 "<gray>当前队伍：<white>" + (team == null ? "未分队" : team.display()),
-                plugin.match().isPve() ? "<dark_gray>PVE 模式下所有人同一队" : "<yellow>点击选择红队 / 蓝队",
-                "<dark_gray>与 /taketori team 等价"));
+                joinedRoom != null && joinedRoom.isPve()
+                        ? "<dark_gray>该房 PVE 模式下所有人同一队"
+                        : "<yellow>点击选择红队 / 蓝队",
+                "<dark_gray>开局瞬间按等待名单自动均衡分队"));
 
         // 告示牌"旁观"与"回大厅"两个动作现在都指向本菜单，对应的按钮就在这里
         boolean audience = plugin.spectator().isAudience(player);
@@ -112,6 +127,12 @@ public final class PlayerMenu implements Listener {
                 "<gray>当前角色：<white>" + character,
                 "<yellow>点击打开角色菜单",
                 "<dark_gray>选完立即绑定并发放武器"));
+
+        inventory.setItem(15, button(Material.FILLED_MAP, "<white>房间列表",
+                "<gray>查看所有房间：模式 / 阶段 / 人数 / 倒计时",
+                "<yellow>点击打开列表",
+                "<dark_gray>等待房可加入，游戏房可旁观",
+                "<dark_gray>与点「房间列表」告示牌等价"));
 
         inventory.setItem(16, button(Material.GOLD_INGOT, "<white>总计排行榜",
                 "<gray>总积分 / 击杀 / 拆家 / 对局数…",
@@ -141,25 +162,30 @@ public final class PlayerMenu implements Listener {
                 MINI.deserialize("<dark_gray>队伍选择"));
         holder.bind(inventory);
 
-        TeamId current = plugin.match().teamOf(player.getUniqueId());
-        boolean pve = plugin.match().isPve();
+        var joinedRoom = plugin.rooms().roomOf(player);
+        TeamId current = joinedRoom == null ? null : joinedRoom.teamOf(player.getUniqueId());
+        boolean pve = joinedRoom != null && joinedRoom.isPve();
         int maxPerTeam = Math.max(1, plugin.config().matchTeamSize());
 
-        inventory.setItem(11, teamButton(TeamId.RED, Material.RED_WOOL, current, pve, maxPerTeam));
-        inventory.setItem(15, teamButton(TeamId.BLUE, Material.BLUE_WOOL, current, pve, maxPerTeam));
+        inventory.setItem(11, teamButton(joinedRoom, TeamId.RED, Material.RED_WOOL, current, pve, maxPerTeam));
+        inventory.setItem(15, teamButton(joinedRoom, TeamId.BLUE, Material.BLUE_WOOL, current, pve, maxPerTeam));
 
+        var waitingRoom = plugin.rooms().roomOf(player);
+        String roomState = waitingRoom == null ? "未加入"
+                : waitingRoom.display() + " 等待中（开局时自动分队）";
         inventory.setItem(13, button(Material.PAPER, "<white>当前状态",
-                "<gray>队伍：<white>" + (current == null ? "未分队" : current.display()),
+                "<gray>房间：<white>" + roomState,
                 "<gray>模式：<white>" + (pve ? "PVE（所有人同队）" : "PVP（红队 vs 蓝队）"),
-                "<gray>队列：<white>" + (plugin.lobby().isQueued(player.getUniqueId()) ? "已加入" : "未加入"),
+                "<dark_gray>队伍在开局瞬间按等待名单均衡分配",
                 "<dark_gray>每队上限 " + maxPerTeam + " 人"));
 
         inventory.setItem(22, button(Material.ARROW, "<yellow>返回", "<gray>回到玩家菜单"));
         player.openInventory(inventory);
     }
 
-    private ItemStack teamButton(TeamId team, Material material, TeamId current, boolean pve, int maxPerTeam) {
-        int size = plugin.match().teamPlayers(team).size();
+    private ItemStack teamButton(com.taketori.kassen.paper.match.room.GameRoom room, TeamId team,
+                               Material material, TeamId current, boolean pve, int maxPerTeam) {
+        int size = room == null ? 0 : room.teamPlayers(team).size();
         boolean mine = current == team;
         boolean full = size >= maxPerTeam && !mine;
         ItemStack item = new ItemStack(pve || full ? Material.GRAY_DYE : material);
@@ -208,6 +234,10 @@ public final class PlayerMenu implements Listener {
                     player.closeInventory();
                     plugin.characterMenu().open(player);
                 }
+                case 15 -> {
+                    player.closeInventory();
+                    plugin.roomListMenu().open(player);
+                }
                 case 16 -> {
                     player.closeInventory();
                     plugin.statsMenu().open(player);
@@ -232,37 +262,51 @@ public final class PlayerMenu implements Listener {
         }
     }
 
+    /** 匹配按钮：无房→快速加入；等待房→退房回大厅；对局中→拒绝（文案走 LobbyManager 统一入口）。 */
     private void toggleQueue(Player player) {
-        if (plugin.lobby().isQueued(player.getUniqueId())) {
-            plugin.lobby().dequeue(player);
-            open(player);
+        var room = plugin.rooms().roomOf(player);
+        if (room != null && (room.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.WAITING
+                || room.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.STARTING)) {
+            player.closeInventory();
+            plugin.lobby().returnToLobby(player);
             return;
         }
-        if (plugin.match().isRunning() && plugin.match().teamOf(player.getUniqueId()) == null) {
-            player.sendMessage(MINI.deserialize("<red>对局已经开始，无法中途加入。<gray>可以点「旁观」观战。"));
+        if (room != null) {
+            player.sendMessage(MINI.deserialize("<red>对局进行中，参赛者不能单独退出。"
+                    + "<gray>要结束整局请找管理员执行 <white>/taketori match stop"));
             return;
         }
-        plugin.lobby().queue(player);
-        open(player);
+        player.closeInventory();
+        plugin.lobby().quickJoin(player);
     }
 
-    /** 旁观 / 退出观战（告示牌 spectate 动作指向的按钮）。 */
+    /** 旁观 / 退出观战：自动选一个进行中的房间（与房间列表里选具体房间等价）。 */
     private void toggleAudience(Player player) {
         if (plugin.spectator().isAudience(player)) {
             player.closeInventory();
             plugin.spectator().leaveAudience(player);
             return;
         }
-        if (!plugin.match().isRunning()) {
+        var live = plugin.rooms().rooms().stream()
+                .filter(room -> room.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.CAGED
+                        || room.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.PLAYING)
+                .findFirst().orElse(null);
+        if (live == null) {
             player.sendMessage(MINI.deserialize("<red>当前没有进行中的对局，无法旁观。"));
             return;
         }
         player.closeInventory();
-        plugin.spectator().enterAudience(player);
+        plugin.spectator().enterAudience(player, live.spectatorViewPoint(), live);
+        player.sendMessage(plugin.config().messages().get("room.spectating", "room", live.display()));
     }
 
     private void choose(Player player, TeamId team) {
-        String error = plugin.match().chooseTeam(player, team);
+        var room = plugin.rooms().roomOf(player);
+        if (room == null) {
+            player.sendMessage(MINI.deserialize("<red>你还没加入房间：先点「快速加入对局」或打开「房间列表」。"));
+            return;
+        }
+        String error = room.chooseTeam(player, team);
         if (error != null) {
             player.sendMessage(MINI.deserialize("<red>" + error));
             return;

@@ -318,6 +318,17 @@ public final class WeaponEditor {
         return player != null && pending.containsKey(player.getUniqueId());
     }
 
+    /**
+     * 玩家退出服务器时清掉未完成的编辑会话。会话原本带 60 秒超时，但只在本玩家
+     * 再次发起聊天/交互时才惰性检查——开着编辑菜单直接退服的条目会一直留在
+     * {@code pending} 里，这里由 {@code forgetPlayer} 在退出事件统一清掉。
+     */
+    public void forget(UUID uuid) {
+        if (uuid != null) {
+            pending.remove(uuid);
+        }
+    }
+
     /** 处理聊天栏输入；返回 true 表示这条消息被编辑器消费掉了。 */
     public boolean handleChat(Player player, String rawMessage) {
         if (player == null) {

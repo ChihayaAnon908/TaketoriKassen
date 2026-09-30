@@ -4,6 +4,7 @@ import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.match.MatchRules;
 import com.taketori.kassen.core.match.PveSettings;
 import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.paper.match.room.GameRoom;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -45,6 +46,8 @@ public final class MinionSpawner {
 
     private static final MiniMessage MINI = MiniMessage.miniMessage();
 
+    /** 所属房间：阶段/规则/场地/播报全部按房间取，不再访问全局单局。 */
+    private final GameRoom room;
     private final TaketoriPlugin plugin;
     private final Set<UUID> minions = ConcurrentHashMap.newKeySet();
     private final Set<UUID> elites = ConcurrentHashMap.newKeySet();
@@ -54,9 +57,14 @@ public final class MinionSpawner {
     /** PVE 大波次：独立于常规刷怪的节奏（默认 5 波、约 1 分钟一波、每波 8 精英）。 */
     private BukkitTask bigWaveTask;
     private int bigWave;
+    /** 轮转游标：普通月人按全部刷新区顺序依次取区（均等分布）。 */
+    private int normalRegionCursor;
+    /** 轮转游标：精英月人只按 mixed 标签区顺序依次取区（均等分布）。 */
+    private int mixedRegionCursor;
 
-    public MinionSpawner(TaketoriPlugin plugin) {
-        this.plugin = plugin;
+    public MinionSpawner(GameRoom room) {
+        this.room = room;
+        this.plugin = room.plugin();
     }
 
     /** 当前波次（记分板显示）。 */
@@ -72,13 +80,20 @@ public final class MinionSpawner {
     public void start() {
         stop();
         wave = 0;
-        MatchRules rules = plugin.match().rules();
+        normalRegionCursor = 0;
+        mixedRegionCursor = 0;
+        MatchRules rules = room.rules();
         long interval = Math.max(20L, rules.minionIntervalSeconds() * 20L);
         task = plugin.scheduler().runTimerTask(this::tick, interval, interval);
         if (plugin.config().debug()) {
-            plugin.getLogger().info("[match] 月人刷新启动：每 " + rules.minionIntervalSeconds()
+            plugin.getLogger().info("[room " + room.id() + "] 月人刷新启动：每 " + rules.minionIntervalSeconds()
                     + " 秒 " + rules.minionPerSpawn() + " 只，上限 " + rules.minionMaxAlive()
                     + "；精英每 " + plugin.minionTypes().elite().everyWaves() + " 波");
+        }
+        // 全部刷新区都是 normal 标签时，精英（精英波 / PVE 大波次）没有可用的刷新区
+        if (room.arena().minionRegionCount() > 0 && room.arena().mixedMinionRegionCount() == 0) {
+            plugin.getLogger().warning("[room " + room.id() + "] 所有月人刷新区标签都是 normal："
+                    + "精英月人与 PVE 大波次不会刷新（把 arenas.yml 里对应刷新区的 kind 改为 mixed 后 /taketori reload）");
         }
         startBigWaves();
     }
@@ -88,7 +103,7 @@ public final class MinionSpawner {
      * 一共 {@code count} 波。只在 PVE 模式且配置开启时生效。
      */
     private void startBigWaves() {
-        if (!plugin.match().isPve()) {
+        if (!room.isPve()) {
             return;
         }
         PveSettings pve = plugin.pveSettings();
@@ -99,13 +114,13 @@ public final class MinionSpawner {
         long delay = Math.max(1L, pve.bigWaveStartDelaySeconds() * 20L);
         long period = Math.max(100L, pve.bigWaveIntervalSeconds() * 20L);
         bigWaveTask = plugin.scheduler().runTimerTask(this::bigWaveTick, delay, period);
-        plugin.match().broadcast("<dark_red>月人入侵：<white>共 " + pve.bigWaveCount() + " 个大波次</white>"
+        room.broadcast("<dark_red>月人入侵：<white>共 " + pve.bigWaveCount() + " 个大波次</white>"
                 + " <gray>（每波 " + pve.elitesPerWave() + " 名精英，间隔约 "
                 + pve.bigWaveIntervalSeconds() + " 秒，难度 " + pve.difficultyDisplay() + "）");
     }
 
     private void bigWaveTick() {
-        if (!plugin.match().isRunning() || !plugin.match().isPve()) {
+        if (!room.isRunning() || !room.isPve()) {
             cancelBigWaves();
             return;
         }
@@ -114,13 +129,12 @@ public final class MinionSpawner {
             boolean finished = bigWave > 0;
             cancelBigWaves();
             if (finished && pve.announce()) {
-                plugin.match().broadcast("<gold>全部 " + bigWave + " 个大波次已打完<gray>："
+                room.broadcast("<gold>全部 " + bigWave + " 个大波次已打完<gray>："
                         + "剩下的月人清完就安全了。");
             }
             return;
         }
-        CuboidRegion region = plugin.arena().minionRegion();
-        if (region == null || region.world() == null) {
+        if (room.arena().minionRegionCount() == 0) {
             return;
         }
 
@@ -130,15 +144,19 @@ public final class MinionSpawner {
         bigWave++;
         MinionTypes.Elite elite = plugin.minionTypes().elite();
         for (int i = 0; i < pve.elitesPerWave(); i++) {
-            spawnElite(region, elite);
+            // 大波次精英同样只在 mixed 标签区之间轮转均分
+            CuboidRegion region = nextMixedRegion();
+            if (region != null && region.world() != null) {
+                spawnElite(region, elite);
+            }
         }
         if (pve.announce()) {
-            plugin.match().broadcast("<dark_red>第 <white>" + bigWave + "<dark_red>/<white>"
+            room.broadcast("<dark_red>第 <white>" + bigWave + "<dark_red>/<white>"
                     + pve.bigWaveCount() + "<dark_red> 大波次：<bold>" + pve.elitesPerWave()
                     + " 名精英月人</bold>涌来！<gray>（精英强化 +" + pve.eliteBuffBonusFor(playerCount())
                     + " 级，注意集火）");
         }
-        plugin.matchBoard().updateAll();
+        room.scoreboard().updateAll();
     }
 
     private void cancelBigWaves() {
@@ -148,9 +166,9 @@ public final class MinionSpawner {
         }
     }
 
-    /** 本局参战玩家数（PVE 时所有人都在红队）。 */
+    /** 本房间参战玩家数（PVE 时所有人都在红队）。 */
     private int playerCount() {
-        return Math.max(1, plugin.match().teamPlayers(TeamId.RED).size());
+        return Math.max(1, room.teamPlayers(TeamId.RED).size());
     }
 
     public void stop() {
@@ -213,14 +231,14 @@ public final class MinionSpawner {
     // ---------------------------------------------------------------- 刷新
 
     private void tick() {
-        if (!plugin.match().isRunning()) {
+        if (!room.isRunning()) {
             return;
         }
-        CuboidRegion region = plugin.arena().minionRegion();
-        if (region == null || region.world() == null) {
+        // 场地可以划多个刷新区：普通月人按区顺序轮转取区，长期各区间刷新数量严格均等
+        if (room.arena().minionRegionCount() == 0) {
             return;
         }
-        MatchRules rules = plugin.match().rules();
+        MatchRules rules = room.rules();
         wave++;
 
         // 普通月人
@@ -228,25 +246,55 @@ public final class MinionSpawner {
         if (budget > 0) {
             int count = Math.min(budget, Math.max(1, rules.minionPerSpawn()));
             for (int i = 0; i < count; i++) {
-                spawnNormal(region, rules);
+                CuboidRegion region = nextNormalRegion();
+                if (region != null && region.world() != null) {
+                    spawnNormal(region, rules);
+                }
             }
         }
 
         // 精英波：不受普通上限限制，只受自己的上限约束
         MinionTypes.Elite elite = plugin.minionTypes().elite();
         if (elite.isEliteWave(wave)) {
-            int room = elite.maxAlive() - eliteCount();
-            int count = Math.min(Math.max(0, room), elite.count());
+            int slots = elite.maxAlive() - eliteCount();
+            int count = Math.min(Math.max(0, slots), elite.count());
             for (int i = 0; i < count; i++) {
-                spawnElite(region, elite);
+                CuboidRegion region = nextMixedRegion();
+                if (region != null && region.world() != null) {
+                    spawnElite(region, elite);
+                }
             }
             if (count > 0) {
-                plugin.match().broadcast("<dark_red>第 " + wave + " 波：<bold>精英月人</bold>出现！"
+                room.broadcast("<dark_red>第 " + wave + " 波：<bold>精英月人</bold>出现！"
                         + "</dark_red> <gray>（" + armorName(elite.armor()) + " + 药水强化，注意集火）");
             }
         }
 
-        plugin.matchBoard().updateAll();
+        room.scoreboard().updateAll();
+    }
+
+    /**
+     * 普通月人选区：按全部刷新区（normal + mixed）的编号顺序<b>轮转</b>取区。
+     * 与逐只随机挑区相比，多区时分布严格均等（如 2 区 × 每波 3 只 → 区1、区2、区1）。
+     */
+    private CuboidRegion nextNormalRegion() {
+        List<CuboidRegion> regions = room.arena().minionRegionList();
+        if (regions.isEmpty()) {
+            return null;
+        }
+        return regions.get(Math.floorMod(normalRegionCursor++, regions.size()));
+    }
+
+    /**
+     * 精英月人选区：只在 mixed 标签区之间轮转取区；
+     * 没有 mixed 区时返回 null（这一批精英不刷新，开局时已告警过一次）。
+     */
+    private CuboidRegion nextMixedRegion() {
+        List<CuboidRegion> regions = room.arena().mixedMinionRegionList();
+        if (regions.isEmpty()) {
+            return null;
+        }
+        return regions.get(Math.floorMod(mixedRegionCursor++, regions.size()));
     }
 
     private void spawnNormal(CuboidRegion region, MatchRules rules) {
@@ -292,7 +340,7 @@ public final class MinionSpawner {
         applyAttack(monster, elite.attackDamage());
         // 精英强化：PVE 时按难度档 + 参战人数线性叠加（每多 1 人 +1 级，封顶）
         PveSettings pve = plugin.pveSettings();
-        int bonus = plugin.match().isPve() ? pve.eliteBuffBonusFor(playerCount()) : 0;
+        int bonus = room.isPve() ? pve.eliteBuffBonusFor(playerCount()) : 0;
         applyBuffs(monster, elite.buffs(), bonus);
         minions.add(monster.getUniqueId());
         elites.add(monster.getUniqueId());

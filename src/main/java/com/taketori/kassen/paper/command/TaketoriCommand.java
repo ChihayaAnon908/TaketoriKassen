@@ -145,8 +145,10 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(plugin.config().messages().prefixed("command.character-not-found", "id", characterId));
             return;
         }
-        // 同队不允许出现相同角色：管理员设置时同样按隐性标签权重裁决
-        var decision = plugin.match().requestRole(target, characterId);
+        // 同队不允许出现相同角色：管理员设置时同样按隐性标签权重裁决，范围是目标玩家所在房间
+        var room = plugin.rooms().roomOf(target);
+        var decision = room != null ? room.requestRole(target, characterId)
+                : new com.taketori.kassen.paper.match.room.GameRoom.RoleDecision(true, null, null);
         if (!decision.granted()) {
             sender.sendMessage(MINI.deserialize("<red>无法设置：" + decision.reason()));
             return;
@@ -584,11 +586,24 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
             if (args.length == 2) {
                 return startsWith(List.of("start", "force", "stop", "status", "mode"), args[1]);
             }
-            if (args.length == 3 && args[1].equalsIgnoreCase("start")) {
-                return startsWith(List.of("force"), args[2]);
-            }
             if (args.length == 3 && args[1].equalsIgnoreCase("mode")) {
                 return startsWith(List.of("pvp", "pve"), args[2]);
+            }
+            // start 的第三个参数可以是 force 或场地 id；force|stop 第三参、mode 第四参补场地 id
+            boolean roomIdHere = (args.length == 3
+                            && (args[1].equalsIgnoreCase("start") || args[1].equalsIgnoreCase("force")
+                            || args[1].equalsIgnoreCase("stop")))
+                    || (args.length == 4 && args[1].equalsIgnoreCase("mode"));
+            if (roomIdHere) {
+                int index = args.length - 1;
+                if (args.length == 3 && args[1].equalsIgnoreCase("start")) {
+                    result.addAll(startsWith(List.of("force"), args[2]));
+                }
+                for (var room : plugin.rooms().rooms()) {
+                    if (room.id().startsWith(args[index].toLowerCase(Locale.ROOT))) {
+                        result.add(room.id());
+                    }
+                }
             }
             return result;
         }
@@ -606,15 +621,34 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
         }
         if (args[0].equalsIgnoreCase("arena")) {
             if (args.length == 2) {
-                return startsWith(List.of("pos1", "pos2", "setminion", "setbase", "setspawn", "wand", "list"), args[1]);
+                return startsWith(List.of("pos1", "pos2", "wand",
+                        "setminion", "delminion", "setbase", "delbase", "setspawn",
+                        "setloot", "delloot", "setoutpost", "deloutpost", "setwait",
+                        "create", "select", "delete", "enable", "disable", "list", "status"), args[1]);
             }
-            if (args.length == 3 && (args[1].equalsIgnoreCase("setbase") || args[1].equalsIgnoreCase("setspawn"))) {
+            if (args.length == 3 && (args[1].equalsIgnoreCase("setbase")
+                    || args[1].equalsIgnoreCase("delbase")
+                    || args[1].equalsIgnoreCase("setspawn"))) {
                 return startsWith(List.of("red", "blue"), args[2]);
             }
-            if (args.length == 4 && args[1].equalsIgnoreCase("setbase")) {
+            // 按场地 id 操作的子命令补全已有场地
+            if (args.length == 3 && List.of("select", "delete", "remove", "enable", "disable")
+                    .contains(args[1].toLowerCase(Locale.ROOT))) {
+                return startsWith(new ArrayList<>(plugin.arena().all().keySet()), args[2]);
+            }
+            if (args.length == 4 && (args[1].equalsIgnoreCase("setbase")
+                    || args[1].equalsIgnoreCase("delbase"))) {
+                // 补全的编号范围跟着当前选中场地的 base.count-per-team 走（auto 时按实际编号顺延）；
+                // 没选场地（控制台/未执行 arena select）时按固定上界
+                int ceiling = com.taketori.kassen.paper.match.ArenaDef.BASES_PER_TEAM;
+                if (sender instanceof Player arenaPlayer) {
+                    var selected = plugin.arena().selected(arenaPlayer.getUniqueId());
+                    if (selected != null) {
+                        ceiling = selected.baseIndexCeiling();
+                    }
+                }
                 List<String> numbers = new ArrayList<>();
-                // 补全的编号范围跟着 base.count-per-team 走（auto 时按实际编号顺延）
-                for (int i = 1; i <= plugin.arena().baseIndexCeiling(); i++) {
+                for (int i = 1; i <= ceiling; i++) {
                     numbers.add(Integer.toString(i));
                 }
                 return startsWith(numbers, args[3]);

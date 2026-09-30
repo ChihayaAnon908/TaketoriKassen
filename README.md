@@ -2,7 +2,7 @@
 
 超时空辉夜姬「竹取合战」的 Minecraft 服务端复刻插件。
 
-**9 名角色 · 17 把武器 · 15 种技能**，用原版事件接管按键做出技能战斗层，再叠上 **3v3 积分赛** 与 **PVE 月人入侵**两种玩法，含完整的大厅、分队、观战与跨局战绩流程。
+**9 名角色 · 17 把武器 · 15 种技能**，用原版事件接管按键做出技能战斗层，再叠上 **3v3 积分赛** 与 **PVE 月人入侵**两种玩法，含完整的大厅、**多房间匹配**、观战与跨局战绩流程。
 
 | 项 | 说明 |
 | --- | --- |
@@ -30,10 +30,10 @@
 
 - **3v3 积分赛**：600 分目标、20 分钟时限；击杀月人 `+3`、击杀玩家 `+10`、拆除基地 `+50`；基地占点读条 10 秒、开局 60 秒保护期。
 - **PVE 月人入侵**：所有人同一队打月人，含**保卫据点**、**五大波次精英潮**、**三档难度**与**精英随人数变强**（详见第四节）。
-- **大厅与分队**：出生点、区域、告示牌（加入 / 旁观 / 选角色 / 回大厅）；点「加入对局」自动随机分队入队，人数达阈值自动开局。
-- **告示牌指向界面**：点击告示牌打开对应 GUI（玩家菜单 / 角色菜单 / 排行榜），具体操作由界面按钮完成。
+- **多房间匹配（BedWars 式）**：一个服务器可配多个场地，每个启用场地一个可反复开局的房间，多房间并发互不干扰；「快速加入」自动进入等待人数最多的房间，**房间列表 GUI** 可选房加入、旁观进行中的对局；等待区倒计时（满员切短倒计时、掉人取消），开局瞬间分队并进出生点玻璃笼，结算后回大厅、房间立即可再匹配。
+- **告示牌指向界面**：点击告示牌打开对应 GUI（玩家菜单 / 角色菜单 / 排行榜），具体操作由界面按钮完成；`join` / `leave` 直接执行匹配动作（快速加入 / 退房回大厅）。
 - **菜单时钟**：发给玩家的一个道具，右键打开玩家菜单（默认进服发放、丢不掉）。
-- **观众模式**：聊天栏给出可点击的「退出观战」按钮并定期重发；阵亡自动进入旁观，倒计时结束回己方出生点复活。
+- **观众模式**：聊天栏给出可点击的「退出观战」按钮并定期重发；阵亡自动进入旁观（屏幕上方 **BossBar 显示复活倒计时**），倒计时结束回己方出生点复活。
 - **跨局战绩**：总积分 / 对局数 / 胜场 / 击杀 / 月人击杀 / 拆家 / 死亡 / 单局最高写入 `data/stats.yml`，`/taketori ranks` 图形查看。
 
 ### 管理工具
@@ -57,12 +57,12 @@
 
 ## 二、安装
 
-1. 把 `TaketoriKassen-1.0.0.jar` 放进服务端 `plugins/` 目录，重启服务器。
+1. 把 `TaketoriKassen-1.1.0.jar` 放进服务端 `plugins/` 目录，重启服务器。
 2. 首次启动会在 `plugins/TaketoriKassen/` 生成 `config.yml`、`weapons.yml`、`characters.yml`、`messages.yml`。
 3. 控制台出现下面这行即加载成功：
 
 ```
-TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类型（适配层 default）
+TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类型（适配层 default）
 ```
 
 | 权限 | 默认 | 用途 |
@@ -92,7 +92,9 @@ TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 /taketori arena setminion
 ```
 
-可配多个刷新区（`setminion 2`、`setminion 3`…），月人在其中随机分布。
+可配多个刷新区（`setminion [编号] [normal|mixed]`）：普通月人在**全部刷新区之间轮转均分**；
+标签 `normal` = 只刷普通月人，`mixed` = 普通 + 精英（默认，也可直接改 arenas.yml 的
+`minion-regions.<编号>.kind`）。精英月人与 PVE 大波次只在 mixed 区刷新。
 
 ### 3. 划双方基地
 
@@ -109,13 +111,14 @@ TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 
 每队数量由 `base.count-per-team` 决定（默认 3，可写 1~16 或 `auto` 表示以实际划定为定）；编号可省略，会自动接下一个空位。建议每个基地 5×5 以上。
 
-### 4. 设双方出生点
+### 4. 设双方出生点与等待出生点
 
-站到位置上执行（用的是**你的站位**，不是选区）：
+站到位置上执行（出生点用的是**你的站位**，不是选区）：
 
 ```
 /taketori arena setspawn red
 /taketori arena setspawn blue
+/taketori arena setwait         # 中立等待出生点：匹配后玩家在此集结倒计时（未设置不能开局）
 ```
 
 ### 5. 设大厅
@@ -134,14 +137,16 @@ TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 放好牌子，准星对着牌子执行（6 格内）：
 
 ```
-/taketori lobby addsign join        # 加入对局
+/taketori lobby addsign join        # 快速加入（自动进入等待人数最多的房间）
+/taketori lobby addsign rooms       # 房间列表（选房加入 / 旁观进行中的房间）
+/taketori lobby addsign leave       # 退房回大厅 / 退出观战
 /taketori lobby addsign spectate    # 旁观
 /taketori lobby addsign character   # 选角色
 /taketori lobby addsign menu        # 玩家菜单
 /taketori lobby addsign ranks       # 排行榜
 ```
 
-可绑动作：`join` / `leave` / `spectate` / `character` / `character:<角色id>` / `menu` / `ranks` / `lobby`。
+可绑动作：`join` / `leave` / `rooms` / `spectate` / `character` / `character:<角色id>` / `menu` / `ranks` / `lobby`。
 
 ### 7. 检查配置
 
@@ -150,23 +155,27 @@ TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 /taketori lobby list
 ```
 
-`arena list` 末尾要显示 **是否可开局：是**，`lobby list` 要显示 **是否可用：是**。
+`arena list` 里每个启用场地要显示 **就绪·开放**（未就绪会列出还缺什么：出生点 / 基地 / 刷新区 / 等待点），`lobby list` 要显示 **是否可用：是**。
 
 ### 8. 开一局
 
-玩家点「加入对局」告示牌（或菜单里的匹配按钮）自动随机分队入队，队列人数达到 `lobby.auto-start-players`（默认 6）自动开局。管理员也可以手动开：
+玩家在大厅点「加入对局」告示牌（或菜单匹配按钮）**快速加入**：自动进入等待人数最多的房间，被传送到该场地的中立等待区；也可以打开**房间列表**选具体的房间。等待人数达到 `waiting.min-players`（默认 2）后房间自动开始倒计时（默认 60 秒，满员切 5 秒，有人退出人数不足则取消），归零后分队进出生点玻璃笼、解笼开战；结算后在线者自动回大厅，房间立即可匹配下一轮。
+
+管理员也可以手动控制（可带场地 id 只作用于指定房间）：
 
 ```
-/taketori match start          # 双方各至少 1 人
-/taketori match force          # 人数不够也开（把大厅里的人自动分队）
+/taketori match start [场地id]     # 对目标房间开局（双方各至少 1 人）
+/taketori match force [场地id]     # 人数不够也开（只按该房等待区现有的人分队）
+/taketori match stop [场地id]      # 结束指定房间（不影响其他并发房间）
+/taketori match status             # 逐房间查看阶段 / 人数 / 比分 / 剩余时间
 ```
 
 ### 9. PVE（可选）
 
 ```
-/taketori arena setoutpost     # 划 PVE 保卫据点（选区中心，或你站的位置）
-/taketori match mode pve       # 切到 PVE（写回 config.yml，下一局生效）
-/taketori pve difficulty hard  # 切难度（easy / normal / hard）
+/taketori arena setoutpost          # 划 PVE 保卫据点（选区中心，或你站的位置）
+/taketori match mode pve [场地id]   # 把房间切到 PVE（仅等待中的房间可切，只改本房间）
+/taketori pve difficulty hard       # 切难度（easy / normal / hard）
 ```
 
 ---
@@ -237,8 +246,8 @@ TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 | 击杀回血 | 击杀敌方玩家回复 3 颗心（`combat.kill-heal`，满血不回） |
 | 基地 | 双方各 3 个（数量可配），开局 60 秒保护期内不能占点 |
 | 占点 | 站进对方基地区域持续 10 秒；区域内没敌人时进度按 `base.decay-per-second` 衰减 |
-| 月人 | 每 9 秒一批（铁甲僵尸 / 铁甲骷髅按权重随机），场上最多 15 个 |
-| 精英月人 | 每 5 波出一批（钻甲 + 药水 buff + 可配攻击力） |
+| 月人 | 每 9 秒一批（铁甲僵尸 / 铁甲骷髅按权重随机），场上最多 15 个；多个刷新区之间**按区轮转均等分布** |
+| 精英月人 | 每 5 波出一批（钻甲 + 药水 buff + 可配攻击力），只在 mixed 标签刷新区出现 |
 | 复活 | 死亡 5 秒后回己方出生点，死亡不掉落物品 |
 | 出生增益 | 开局与复活后 10 秒药水增益（`combat.spawn-buff`） |
 | 记分板 | 双方比分 / 你的得分 / 本局击杀 / 波次 / 剩余分钟 |
@@ -283,21 +292,26 @@ TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 /taketori keys                     按键诊断：回放最近收到的原始输入事件
 /taketori tag <玩家> <标签|none>   查看 / 设置隐性标签（管理员）
 /taketori tags                     隐性标签 GUI（管理员）
-/taketori lobby join|leave|spectate 自助加入队列 / 退出 / 旁观
-/taketori leave                    退出队列、退出观战、离开对局
+/taketori lobby join|leave|spectate 快速加入房间 / 退房回大厅 / 旁观
+/taketori leave                    退出观战、离开等待房间（对局中参赛者不能中途退出）
 /taketori doctor                   自检：识别链路、名字解析、配置校验、多世界范围
 ```
 
 ### 管理员指令（`taketori.admin`）
 
-**场地**
+**场地**（多场地：`set*` / `del*` 作用于当前选中的场地，先用 `create` / `select` 选中）
 
 ```
+/taketori arena create <id>                      新建场地并自动选中
+/taketori arena select <id>                      切换当前操作的场地
+/taketori arena enable | disable <id>            开放 / 关闭场地（关闭后匹配不再选中）
+/taketori arena delete <id>                      删除场地（房间运行中会被拦截）
 /taketori arena wand                             领选区锄（左键 = 角点 1，右键 = 角点 2，潜行+左键 = 清空）
 /taketori arena pos1 | pos2                      用当前位置设置选区角点
-/taketori arena setminion [编号]                 选区设为月人刷新区（可配多个）
+/taketori arena setminion [编号] [normal|mixed]  选区设为月人刷新区（normal 只刷普通，mixed 普通+精英；按区轮转均分）
 /taketori arena setbase <red|blue> [编号]        选区设为某队基地（编号可省略）
 /taketori arena setspawn <red|blue>              当前位置设为某队出生点
+/taketori arena setwait                          当前位置设为中立等待出生点（未设置不能开局）
 /taketori arena setloot [编号]                   选区设为道具刷新点
 /taketori arena lootwand                         领道具点工具
 /taketori arena setoutpost                       选区中心（或当前位置）设为 PVE 保卫据点
@@ -306,7 +320,7 @@ TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 /taketori arena delloot <编号>                   删除某个道具刷新点
 /taketori arena deloutpost                       清除据点位置
 /taketori arena clearselection                   清空你的选区
-/taketori arena list                             查看已配置场地与「是否可开局」
+/taketori arena list                             查看全部场地的启用与就绪情况
 ```
 
 **大厅**
@@ -319,18 +333,18 @@ TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 /taketori lobby list                             查看大厅配置与告示牌
 ```
 
-**对局**
+**对局**（多房间：不写场地 id 时取「你所在房间 → default → 第一个房间」）
 
 ```
-/taketori match start [force]                    开始对局
-/taketori match force                            人数不够也开（自动把大厅里的人分队）
-/taketori match stop [原因]                      强制结束对局
-/taketori match status                           阶段 / 比分 / 剩余 / 基地 / 场上月人
-/taketori match mode <pvp|pve>                   切换模式并写回 config.yml（下一局生效）
+/taketori match start [场地id]                   对指定房间开局（双方各至少 1 人）
+/taketori match force [场地id]                   人数不够也开（只按该房等待区的人分队）
+/taketori match stop [场地id] [原因]             结束指定房间（不影响其他并发房间）
+/taketori match status                           逐房间列出阶段 / 比分 / 剩余 / 基地 / 场上月人
+/taketori match mode <pvp|pve> [场地id]          切换指定房间模式（仅等待中可切，不写全局配置）
 /taketori match difficulty <easy|normal|hard>    同下面的 pve difficulty
 /taketori pve                                    查看 PVE 设置（难度 / 波次 / 据点耐久）
 /taketori pve difficulty <easy|normal|hard>      切换 PVE 难度（下一局生效）
-/taketori team <玩家> <red|blue|none>            手动分队
+/taketori team <玩家> <red|blue|none>            手动分队（作用于目标玩家所在房间）
 /taketori character <玩家> <角色id|none>         指定角色（同队不能重复）
 ```
 
@@ -349,18 +363,19 @@ TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 
 ## 六、配置项
 
-改完 `config.yml` 执行 `/taketori reload` 生效（场地坐标在 `arena.yml`、大厅在 `lobby.yml`，不受 reload 影响）。
+改完 `config.yml` 执行 `/taketori reload` 生效（场地坐标在 `arenas.yml`、大厅在 `lobby.yml`，不受 reload 影响）。
 
 | 段 | 关键项 | 默认 |
 | --- | --- | --- |
 | `match` | `mode` / `score-to-win` / `time-limit-minutes` / `team-size` / `respawn-delay-seconds` / `keep-inventory` | pvp / 600 / 20 / 3 / 5 / true |
+| `waiting` | `min-players` / `countdown-seconds` / `full-countdown-seconds` / `cage-hold-seconds` / `end-delay-seconds` / `cage-material` / `pve-full-players` / `void-y-offset` / `protect` | 2 / 60 / 5 / 3 / 5 / GLASS / 0（取 team-size）/ -10 / true |
 | `scoring` | `minion-kill` / `player-kill` / `base-capture` | 3 / 10 / 50 |
 | `combat` | `kill-heal` / `minion-kill-heal` / `friendly-fire-protection` / `third-slot-buff` | 6.0 / 0.0 / auto / 2 秒跳跃提升 V |
 | `loadout` | `armor-enabled` / `armor-material` / `armor-protection` | true / IRON / 2（保护 II） |
-| `minion` | `health` / `iron-armor` / `interval-seconds` / `per-spawn` / `max-alive` / `types` / `elite` | 40 / true / 9 / 3 / 15 / 僵尸骷髅权重 / 每 5 波 |
+| `minion` | `health` / `iron-armor` / `interval-seconds` / `per-spawn` / `max-alive` / `types` / `elite` | 40 / true / 9 / 3 / 15 / 僵尸骷髅权重 / 每 5 波（刷新节奏三项可在 arenas.yml 的 `minion-spawn` 按场地覆盖） |
 | `pve` | `difficulty` / `big-waves` / `elite-scaling` / `outpost` | normal / 5 波·8 精英·60 秒 / 每多 1 人 +1 级 / 三档数值 |
 | `base` | `count-per-team` / `capture-seconds` / `capture-delay-seconds` / `decay-per-second` / `multi-player-bonus` | 3（或 auto）/ 10 / 60 / 0.5 / true |
-| `lobby` | `auto-start-players` / `teleport-on-join` / `takeover-worlds` / `protect` / `return-after-match` | 6 / true / `[]`（仅大厅世界）/ true / true |
+| `lobby` | `teleport-on-join` / `takeover-worlds` / `protect` / `return-after-match` | true / `[]`（仅大厅世界）/ true / true |
 | `worlds` | `broadcast-scope` | world（只发给消息所属世界；`all` = 全服） |
 | `menu-clock` | `enabled` / `material` / `give-on-join` / `name` / `lore` | true / CLOCK / true / … |
 | `input` | `q-mode` / `weapon-slots` / `shift-right-trigger` | drop / [0,1,2,3] / double-sneak |
@@ -369,6 +384,9 @@ TaketoriKassen v1.0.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 | `setup-wand` | `enabled` / `material` / `loot-material` / `give-on-join` | true / NETHERITE_HOE / STRUCTURE_VOID / false |
 | `loot` | `enabled` / `interval-seconds` / `max-drops` / `items` | true / 30 / 6 / 道具池 |
 | `tags` | `default` / `vip` / `staff` 的权重 | 0 / 10 / 100 |
+
+> 多房间化之后，开局时机由 `waiting.min-players` / 房间倒计时决定；`lobby.auto-start-players`
+> 是旧队列流程的遗留键，已不再参与任何逻辑（保留只为兼容旧配置文件）。
 
 ### 数值文件（插件不会覆盖）
 

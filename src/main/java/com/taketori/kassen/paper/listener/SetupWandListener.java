@@ -2,6 +2,7 @@ package com.taketori.kassen.paper.listener;
 
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.paper.setup.SetupWandService;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -118,7 +119,7 @@ public final class SetupWandListener implements Listener {
         if (player.hasPermission("taketori.admin")) {
             return true;
         }
-        plugin.matchBoard().actionBar(player, "<red>选区锄需要 taketori.admin 权限");
+        player.sendActionBar(MiniMessage.miniMessage().deserialize("<red>选区锄需要 taketori.admin 权限"));
         return false;
     }
 }

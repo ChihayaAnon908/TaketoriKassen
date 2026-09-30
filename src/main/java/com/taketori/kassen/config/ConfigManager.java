@@ -347,6 +347,56 @@ public final class ConfigManager {
         return plugin.getConfig().getBoolean("lobby.teleport-on-join", true);
     }
 
+    // ---- 房间等待区（BedWars 式匹配）----
+
+    /** 等待人数达到多少开始倒计时（至少 1 人）。 */
+    public int waitingMinPlayers() {
+        return Math.max(1, plugin.getConfig().getInt("waiting.min-players", 2));
+    }
+
+    /** 达到最低人数后的倒计时秒数（至少 1 秒）。 */
+    public int waitingCountdownSeconds() {
+        return Math.max(1, plugin.getConfig().getInt("waiting.countdown-seconds", 60));
+    }
+
+    /** 房间满员后的短倒计时秒数（0 也允许：满员立即开局）。 */
+    public int waitingFullCountdownSeconds() {
+        return Math.max(0, plugin.getConfig().getInt("waiting.full-countdown-seconds", 5));
+    }
+
+    /** 开局后出生点玻璃笼保护秒数（0 = 不用笼子，立即开战）。 */
+    public int waitingCageHoldSeconds() {
+        return Math.max(0, plugin.getConfig().getInt("waiting.cage-hold-seconds", 3));
+    }
+
+    /** 对局结束后在房间停留多少秒再统一回大厅。 */
+    public int waitingEndDelaySeconds() {
+        return Math.max(0, plugin.getConfig().getInt("waiting.end-delay-seconds", 5));
+    }
+
+    /** 玻璃笼方块材质（原版 Material 名，非法值由建笼方回落到 GLASS）。 */
+    public String waitingCageMaterial() {
+        return plugin.getConfig().getString("waiting.cage-material", "GLASS");
+    }
+
+    /**
+     * PVE 房间满员人数：配置 {@code <=0} 时回落为每队人数上限（match.team-size）。
+     */
+    public int waitingPveFullPlayers() {
+        int configured = plugin.getConfig().getInt("waiting.pve-full-players", 0);
+        return configured > 0 ? configured : matchTeamSize();
+    }
+
+    /** 虚空拉回判定偏移：等待者 Y 低于 waitSpawn.y + 该值时拉回（通常为负数）。 */
+    public int waitingVoidYOffset() {
+        return plugin.getConfig().getInt("waiting.void-y-offset", -10);
+    }
+
+    /** 等待区是否启用完全保护。 */
+    public boolean waitingProtect() {
+        return plugin.getConfig().getBoolean("waiting.protect", true);
+    }
+
     public boolean soulbound() {
         return soulbound;
     }

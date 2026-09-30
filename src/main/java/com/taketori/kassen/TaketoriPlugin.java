@@ -30,14 +30,9 @@ import com.taketori.kassen.paper.editor.WeaponEditor;
 import com.taketori.kassen.paper.setup.SetupWand;
 import com.taketori.kassen.paper.setup.SetupWandService;
 import com.taketori.kassen.paper.match.ArenaManager;
-import com.taketori.kassen.paper.match.BaseCaptureManager;
 import com.taketori.kassen.paper.match.MatchListener;
-import com.taketori.kassen.paper.match.MatchManager;
-import com.taketori.kassen.paper.match.MatchScoreboard;
-import com.taketori.kassen.paper.match.LootSpawner;
-import com.taketori.kassen.paper.match.MinionSpawner;
 import com.taketori.kassen.paper.match.MinionTypes;
-import com.taketori.kassen.paper.match.OutpostManager;
+import com.taketori.kassen.paper.match.room.RoomManager;
 import com.taketori.kassen.paper.match.SpectatorManager;
 import com.taketori.kassen.paper.match.StatsMenu;
 import com.taketori.kassen.paper.match.StatsTracker;
@@ -102,25 +97,22 @@ public final class TaketoriPlugin extends JavaPlugin {
     private ProjectileSkill projectileSkill;
     private PlayerDataStore dataStore;
 
-    // ---- 玩法层（3v3 积分赛）----
+    // ---- 玩法层（3v3 积分赛，多房间）----
     private ArenaManager arena;
-    private MatchManager match;
-    private MatchScoreboard matchBoard;
-    private MinionSpawner minions;
-    private OutpostManager outpost;
+    /** 多房间注册表（BedWars 式匹配）；玩家→房间归属的唯一权威。 */
+    private RoomManager rooms;
     private MenuClock menuClock;
     private InputListener input;
     /** 月人种类与精英规格（从 config.yml 读取）。 */
     private MinionTypes minionTypes;
-    private BaseCaptureManager baseCapture;
-    /** 对局内道具刷新（刷新点由管理员用道具点工具划定）。 */
-    private LootSpawner loot;
     private StatsTracker stats;
     private SpectatorManager spectator;
     private LobbyManager lobby;
     private CharacterMenu characterMenu;
     /** 玩家入口菜单（匹配 / 队伍选择 / 角色选择 / 排行榜）。 */
     private PlayerMenu playerMenu;
+    /** 房间列表 GUI（等待房加入 / 游戏房旁观）。 */
+    private com.taketori.kassen.paper.lobby.RoomListMenu roomListMenu;
     /** 总计排行榜（跨局累计）。 */
     private StatsMenu statsMenu;
     /** 管理员菜单（把常用管理指令映射成按钮）。 */
@@ -167,22 +159,17 @@ public final class TaketoriPlugin extends JavaPlugin {
         dataStore.loadAll();
         restoreOnlinePlayers();
 
-        // ---- 玩法层：场地、对局、记分板、小怪、基地占点、跨局统计 ----
+        // ---- 玩法层：场地、多房间注册表（每房自有记分板/小怪/据点/道具组件）、跨局统计 ----
         arena = new ArenaManager(this);
         arena.load();
-        matchBoard = new MatchScoreboard(this);
         stats = new StatsTracker(this);
         stats.load();
-        match = new MatchManager(this);
-        match.loadRules();
-        minions = new MinionSpawner(this);
+        // 多房间：为每个启用场地各建一个等待房间
+        rooms = new RoomManager(this);
+        rooms.build();
         minionTypes = new MinionTypes(this);
         minionTypes.load();
-        outpost = new OutpostManager(this);
         menuClock = new MenuClock(this);
-        baseCapture = new BaseCaptureManager(this);
-        loot = new LootSpawner(this);
-        loot.load();
         // ---- 大厅与旁观 ----
         spectator = new SpectatorManager(this);
         lobby = new LobbyManager(this);
@@ -190,6 +177,7 @@ public final class TaketoriPlugin extends JavaPlugin {
         characterMenu = new CharacterMenu(this);
         // ---- 玩家菜单与总计排行榜（原有的告示牌与指令全部保留）----
         playerMenu = new PlayerMenu(this);
+        roomListMenu = new com.taketori.kassen.paper.lobby.RoomListMenu(this);
         statsMenu = new StatsMenu(this);
         adminMenu = new AdminMenu(this);
         tagMenu = new TagMenu(this);
@@ -201,14 +189,21 @@ public final class TaketoriPlugin extends JavaPlugin {
         editor = new WeaponEditor(this);
         getServer().getPluginManager().registerEvents(new WeaponEditorListener(this), this);
         getServer().getPluginManager().registerEvents(new MatchListener(this), this);
+        getServer().getPluginManager().registerEvents(
+                new com.taketori.kassen.paper.match.WaitingListener(this), this);
         getServer().getPluginManager().registerEvents(new LobbyListener(this), this);
         getServer().getPluginManager().registerEvents(characterMenu, this);
         getServer().getPluginManager().registerEvents(playerMenu, this);
+        getServer().getPluginManager().registerEvents(roomListMenu, this);
         getServer().getPluginManager().registerEvents(statsMenu, this);
         getServer().getPluginManager().registerEvents(adminMenu, this);
         getServer().getPluginManager().registerEvents(tagMenu, this);
-        // 每秒驱动对局计时（时限判定）
-        scheduler.runTimerTask(() -> match.tick(), 20L, 20L);
+        // 每秒驱动全部房间计时（含观战提醒）
+        scheduler.runTimerTask(() -> {
+            if (rooms != null) {
+                rooms.tickAll();
+            }
+        }, 20L, 20L);
 
         input = new InputListener(this);
         getServer().getPluginManager().registerEvents(input, this);
@@ -250,18 +245,9 @@ public final class TaketoriPlugin extends JavaPlugin {
         if (skills != null) {
             skills.cooldownBars().clearAll();   // 移除所有玩家屏幕上的冷却条
         }
-        // 玩法层清理：停刷怪、停占点、保存场地与战绩、撤掉记分板
-        if (minions != null) {
-            minions.stop();
-        }
-        if (outpost != null) {
-            outpost.stop();
-        }
-        if (baseCapture != null) {
-            baseCapture.stop();
-        }
-        if (matchBoard != null) {
-            matchBoard.clearAll();
+        // 玩法层清理：停所有房间（每房自有刷怪/占点/据点/道具/记分板：取消任务、还原笼子、清实体、隐藏记分板）
+        if (rooms != null) {
+            rooms.stopAll();
         }
         if (arena != null) {
             arena.save();
@@ -352,10 +338,37 @@ public final class TaketoriPlugin extends JavaPlugin {
         lines.add("进服送大厅: " + (config.lobbyTeleportOnJoin()
                 ? "开（" + WorldScope.describeTakeover(config.lobbyTakeoverWorlds(), lobbyWorld) + "）"
                 : "关（lobby.teleport-on-join: false）"));
-        Set<String> doctorMatchWorlds = match == null ? Set.of() : match.matchWorlds();
-        lines.add("对局世界: " + (doctorMatchWorlds.isEmpty()
-                ? "未记录到（场地未配或还没开过局）"
-                : String.join(", ", doctorMatchWorlds)));
+
+        // ---- 多场地 / 多房间（BedWars 式匹配的核心排查项）----
+        lines.add("--- 场地与房间 ---");
+        var allArenas = arena == null ? java.util.Map.<String, com.taketori.kassen.paper.match.ArenaDef>of()
+                : arena.all();
+        if (allArenas.isEmpty()) {
+            lines.add("场地: 无（/taketori arena create <id> 创建，配好后 enable 并 /taketori reload）");
+        } else {
+            for (var entry : allArenas.entrySet()) {
+                var def = entry.getValue();
+                var roomForArena = rooms == null ? null : rooms.room(def.id());
+                Set<String> roomWorldNames = roomForArena == null ? Set.of() : roomForArena.roomWorlds();
+                String worlds = roomForArena == null ? "（未开放，无房间）"
+                        : (roomWorldNames.isEmpty() ? "（房间未开局，暂无对局世界）"
+                        : String.join(",", roomWorldNames));
+                lines.add("场地 " + def.id() + ": " + (def.enabled() ? "开放" : "关闭")
+                        + " / " + (def.isReady() ? "就绪" : "未就绪（缺 " + def.missingHint() + "）")
+                        + " / 世界 " + worlds);
+            }
+        }
+        if (rooms != null) {
+            for (var room : rooms.rooms()) {
+                String live = room.isRunning() ? "进行中 剩余" + room.remainingText()
+                        : room.phase().name();
+                lines.add("房间 " + room.id() + ": " + live
+                        + " / " + (room.isPve() ? "PVE" : "PVP")
+                        + " / 等待 " + room.waitingCount() + "/" + room.maxPlayers()
+                        + (room.arena().isReady() ? "" : " / !! 场地未就绪"));
+            }
+            lines.add("房间总数: " + rooms.rooms().size());
+        }
         lines.add("消息播报: " + ("all".equalsIgnoreCase(config.broadcastScope())
                 ? "全服（所有世界都能看到）"
                 : "只发给消息所属世界（对局播报→对局世界，大厅播报→大厅世界）"));
@@ -434,10 +447,12 @@ public final class TaketoriPlugin extends JavaPlugin {
             }
             return false;
         }
-        match.loadRules();
         arena.load();
+        if (rooms != null) {
+            // 多房间：旧房间玩家回大厅、旧房间停止，再按新配置/启用场地重建（全部回到 WAITING）
+            rooms.rebuild();
+        }
         minionTypes.load();   // 月人种类与精英规格
-        loot.load();          // 道具刷新池
         loadTags();           // 隐性标签与权重
         validateConfig();
         return true;
@@ -602,6 +617,9 @@ public final class TaketoriPlugin extends JavaPlugin {
             skills.cooldownBars().clear(uuid);   // 清掉屏幕上残留的冷却条
         }
         config.characters().forget(uuid);
+        if (editor != null) {
+            editor.forget(uuid);   // 未完成的武器编辑会话
+        }
     }
 
     public void markInternalDamage(UUID uuid) {
@@ -671,21 +689,9 @@ public final class TaketoriPlugin extends JavaPlugin {
         return arena;
     }
 
-    public MatchManager match() {
-        return match;
-    }
-
-    public MatchScoreboard matchBoard() {
-        return matchBoard;
-    }
-
-    public MinionSpawner minions() {
-        return minions;
-    }
-
-    /** PVE 保卫据点（雪傀儡）。 */
-    public OutpostManager outpost() {
-        return outpost;
+    /** 多房间注册表（BedWars 式匹配；玩家→房间唯一权威映射）。 */
+    public RoomManager rooms() {
+        return rooms;
     }
 
     /** 菜单时钟（右键打开玩家菜单的道具）。 */
@@ -708,15 +714,6 @@ public final class TaketoriPlugin extends JavaPlugin {
         return minionTypes;
     }
 
-    /** 对局内道具刷新器。 */
-    public LootSpawner loot() {
-        return loot;
-    }
-
-    public BaseCaptureManager baseCapture() {
-        return baseCapture;
-    }
-
     public StatsTracker stats() {
         return stats;
     }
@@ -736,6 +733,11 @@ public final class TaketoriPlugin extends JavaPlugin {
     /** 玩家入口菜单（匹配 / 队伍选择 / 角色选择 / 排行榜）。 */
     public PlayerMenu playerMenu() {
         return playerMenu;
+    }
+
+    /** 房间列表 GUI（等待房加入 / 游戏房旁观）。 */
+    public com.taketori.kassen.paper.lobby.RoomListMenu roomListMenu() {
+        return roomListMenu;
     }
 
     /** 总计排行榜（跨局累计）。 */

@@ -111,8 +111,10 @@ public final class CharacterMenu implements Listener {
             player.sendMessage(MINI.deserialize("<red>该角色已不存在：" + characterId));
             return;
         }
-        // 同队不允许出现相同角色：冲突时按隐性标签权重裁决（权重高者优先）
-        var decision = plugin.match().requestRole(player, characterId);
+        // 同队不允许出现相同角色：冲突时按隐性标签权重裁决（权重高者优先），裁决范围是所在房间
+        var room = plugin.rooms().roomOf(player);
+        var decision = room != null ? room.requestRole(player, characterId)
+                : new com.taketori.kassen.paper.match.room.GameRoom.RoleDecision(true, null, null);
         if (!decision.granted()) {
             player.sendMessage(MINI.deserialize("<red>无法选择该角色：" + decision.reason()));
             player.sendMessage(MINI.deserialize("<gray>可以换一个角色，或让管理员调高你的隐性标签权重。"));

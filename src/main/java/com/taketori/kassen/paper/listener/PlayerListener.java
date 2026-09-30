@@ -60,10 +60,15 @@ public final class PlayerListener implements Listener {
         if (plugin.config().setupWandGiveOnJoin() && player.hasPermission("taketori.admin")) {
             plugin.scheduler().runLater(() -> plugin.setupWand().wand().give(player), 30L);
         }
+        // 重连返还：若上一次在对局中断线，把开局前备份的背包还回去
+        plugin.rooms().restoreOfflineBackup(player);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
-        plugin.forgetPlayer(event.getPlayer());
+        Player player = event.getPlayer();
+        // 对局中断线：把该房间为其备份的原背包转到全局暂存，等重连再还
+        plugin.rooms().stashOfflineBackup(player.getUniqueId());
+        plugin.forgetPlayer(player);
     }
 }

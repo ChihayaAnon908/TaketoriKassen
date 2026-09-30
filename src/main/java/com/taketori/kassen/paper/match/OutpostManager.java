@@ -2,6 +2,7 @@ package com.taketori.kassen.paper.match;
 
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.match.PveSettings;
+import com.taketori.kassen.paper.match.room.GameRoom;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -31,6 +32,8 @@ public final class OutpostManager {
     /** 血量显示的刷新间隔（tick）；扣血判定也是这个节奏（1 秒一次）。 */
     private static final long TICK_PERIOD = 20L;
 
+    /** 所属房间：场地/阶段/播报/刷怪归属全部按房间取。 */
+    private final GameRoom room;
     private final TaketoriPlugin plugin;
 
     private PveSettings settings;
@@ -41,8 +44,9 @@ public final class OutpostManager {
     /** 每秒扣血的平滑值：多人同时拆时按月人数放大。 */
     private double lastDamagePerSecond;
 
-    public OutpostManager(TaketoriPlugin plugin) {
-        this.plugin = plugin;
+    public OutpostManager(GameRoom room) {
+        this.room = room;
+        this.plugin = room.plugin();
     }
 
     /** 是否正在运行（据点已经放出来且没被拆掉）。 */
@@ -84,7 +88,7 @@ public final class OutpostManager {
         if (pveSettings == null || !pveSettings.outpostEnabled()) {
             return "配置里关掉了 pve.outpost.enabled";
         }
-        Location spot = plugin.arena().outpost();
+        Location spot = room.arena().outpost();
         if (spot == null || spot.getWorld() == null) {
             return "没有可用位置：先用 /taketori arena setoutpost 划定据点，或设置月人刷新区";
         }
@@ -115,7 +119,7 @@ public final class OutpostManager {
         updateName();
 
         this.task = plugin.scheduler().runTimerTask(this::tick, TICK_PERIOD, TICK_PERIOD);
-        plugin.match().broadcast(pveSettings.outpostName() + " <gray>已就位！"
+        room.broadcast(pveSettings.outpostName() + " <gray>已就位！"
                 + "<white>守住它</white> <dark_gray>(" + (int) maxHealth + " 点耐久，"
                 + settings.difficultyDisplay() + " 难度)");
         if (plugin.config().debug()) {
@@ -143,7 +147,7 @@ public final class OutpostManager {
 
     /** 每秒一次：按半径内的月人数扣血。 */
     private void tick() {
-        if (!plugin.match().isRunning()) {
+        if (!room.isRunning()) {
             stop();
             return;
         }
@@ -187,7 +191,7 @@ public final class OutpostManager {
         Collection<Entity> nearby = world.getNearbyEntities(center, radius, radius, radius);
         int count = 0;
         for (Entity entity : nearby) {
-            if (entity instanceof LivingEntity && plugin.minions().isMinion(entity)) {
+            if (entity instanceof LivingEntity && room.minions().isMinion(entity)) {
                 count++;
             }
         }
@@ -210,13 +214,13 @@ public final class OutpostManager {
         Location spot = location();
         String name = settings == null ? "据点" : settings.outpostName();
         stop();
-        plugin.match().broadcast(name + " <dark_red><bold>已被月人拆毁！");
+        room.broadcast(name + " <dark_red><bold>已被月人拆毁！");
         if (spot != null) {
             plugin.fx().particle("EXPLOSION", spot, 12, 1.2D);
             plugin.fx().sound("ENTITY_GENERIC_EXPLODE", spot, 1.0F, 0.8F);
         }
-        if (settings != null && settings.endMatchOnOutpostDestroyed() && plugin.match().isRunning()) {
-            plugin.match().stop("据点被拆毁");
+        if (settings != null && settings.endMatchOnOutpostDestroyed() && room.isRunning()) {
+            room.stop("据点被拆毁");
         }
     }
 
