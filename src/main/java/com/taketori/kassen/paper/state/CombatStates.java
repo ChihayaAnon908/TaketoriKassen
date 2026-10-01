@@ -59,6 +59,20 @@ public final class CombatStates {
     /** 破甲提升的硬上限：再多也只当 30%，避免"破满甲一刀半血"。 */
     public static final double MAX_ARMOR_PIERCE = 0.30D;
 
+    /**
+     * 进攻窗口：<b>自己造成的</b>伤害提升（盾牌的壁垒模式用）。
+     *
+     * <p>与 {@link ArmorBreak} 的区别在受益方：破甲是"目标挨打更疼"（谁打都受益），
+     * 进攻窗口是"我打人更疼"（只有持有者受益）。两者在结算时取 {@code Math.max} 而非连乘，
+     * 避免"自己开窗口 + 对面被破甲"叠出双倍穿透。</p>
+     */
+    public record Offense(long untilMillis, double pierce) {
+
+        public boolean expired() {
+            return System.currentTimeMillis() >= untilMillis;
+        }
+    }
+
     private static final class ChainState {
         private String weaponId;
         private int stacks;
@@ -70,6 +84,7 @@ public final class CombatStates {
     private final Map<UUID, Reflection> reflections = new ConcurrentHashMap<>();
     private final Map<UUID, Mark> marks = new ConcurrentHashMap<>();
     private final Map<UUID, ArmorBreak> armorBreaks = new ConcurrentHashMap<>();
+    private final Map<UUID, Offense> offenses = new ConcurrentHashMap<>();
     private final Map<UUID, ChainState> chains = new ConcurrentHashMap<>();
 
     // ---------------------------------------------------------------- 防御窗口
@@ -209,6 +224,39 @@ public final class CombatStates {
         return state == null ? 0.0D : state.pierce();
     }
 
+    // ---------------------------------------------------------------- 进攻窗口（盾牌壁垒）
+
+    /** 开一个"自己打人更疼"的窗口；{@code pierce} 同样夹到 {@link #MAX_ARMOR_PIERCE}。 */
+    public void setOffense(UUID uuid, int ticks, double pierce) {
+        if (uuid == null || ticks <= 0 || pierce <= 0.0D) {
+            return;
+        }
+        offenses.put(uuid, new Offense(System.currentTimeMillis() + ticks * 50L,
+                Math.min(MAX_ARMOR_PIERCE, pierce)));
+    }
+
+    /** 进攻窗口（惰性过期清理）；没有或已过期返回 null。 */
+    public Offense offense(UUID uuid) {
+        if (uuid == null) {
+            return null;
+        }
+        Offense state = offenses.get(uuid);
+        if (state == null) {
+            return null;
+        }
+        if (state.expired()) {
+            offenses.remove(uuid);
+            return null;
+        }
+        return state;
+    }
+
+    /** 进攻窗口带来的伤害提升比例（0 = 没有窗口）。 */
+    public double offensePierce(UUID uuid) {
+        Offense state = offense(uuid);
+        return state == null ? 0.0D : state.pierce();
+    }
+
     // ---------------------------------------------------------------- 连击层数（彩叶的剑）
 
     /**
@@ -253,6 +301,7 @@ public final class CombatStates {
         reflections.remove(uuid);
         marks.remove(uuid);
         armorBreaks.remove(uuid);
+        offenses.remove(uuid);
         chains.remove(uuid);
     }
 
@@ -267,6 +316,7 @@ public final class CombatStates {
         reflections.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
         marks.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
         armorBreaks.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
+        offenses.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
         fallImmunities.entrySet().removeIf(entry -> now >= entry.getValue());
         chains.entrySet().removeIf(entry -> now >= entry.getValue().expiresAt);
     }
@@ -277,11 +327,12 @@ public final class CombatStates {
         reflections.clear();
         marks.clear();
         armorBreaks.clear();
+        offenses.clear();
         chains.clear();
     }
 
     public int size() {
         return defenses.size() + fallImmunities.size() + reflections.size() + marks.size()
-                + armorBreaks.size() + chains.size();
+                + armorBreaks.size() + offenses.size() + chains.size();
     }
 }

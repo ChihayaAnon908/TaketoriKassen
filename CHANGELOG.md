@@ -5,6 +5,33 @@
 
 ---
 
+## 1.4.1 — 修 2.0 版的死参数与召唤物生命周期
+
+review 发现 2.0 有几处「白名单收下、配置在用、代码却没读」以及召唤物生命周期缺口：
+
+- **`shockwave` 的破甲 / 易伤此前完全没实现**：`kaguya_hammer.HAMMER.left` 的
+  `mark-bonus`/`mark-ticks` 与 `rai_banner.shift-right` 的 `armor-pierce`/`debuff-*` 写了也无效——
+  辉夜「砸地挂易伤接火箭弹」、雷「震旗开伤害窗口」两条组合技根本不存在。现在两者都真正写入状态；
+- **`shield_guard` 的 `armor-pierce` 此前没实现**：`rai_shield.BULWARK` 的「窗口内自身伤害 +22%」
+  是空的。新增 `CombatStates.Offense`（进攻窗口），并与目标身上的破甲在结算时取 **max 而非连乘**
+  （否则「自己开窗口 + 对面正好被破甲」会叠出双倍穿透）；
+- **召唤物重召会误删新召唤物**：到期回收任务的句柄没保存，t=6s 重召时第一个任务会在 t=12s
+  把新那只一起删掉（实际只活 6 秒）。现在按 owner 持有句柄并在重召时取消；
+- **房间回收不清理召唤物**：`GameRoom.stopComponents` 现在清掉本房世界里带 `summoned_owner`
+  的实体（此前靠世界卸载兜底，玩家中途退场时狗会留在房里继续咬人）；
+- **兑现没有任何反馈**：`echo-bonus` 到底生效没有玩家无从判断。近战与弹体两条路径现在都会在
+  动作栏报「兑现！本次伤害 ×N%」。
+
+已知遗留（当前配置未触发，但一旦使用会出问题，记在这里不埋着）：
+
+- `projectile.armor-pierce` 的持续时长复用了 `mark-ticks`，没有独立键；
+- `armor_break` 的 `debuff-stacks` 只存不读（设计要求的「破甲 ×N」提示未实现）；
+- `echo-ticks` 仍是死参数（兑现提示改为固定短时，不再读它）；
+- `summonedExpire` / `zoneOwner` 两个 PDC 键目前无人读取；`DeployZoneSkill.clear/clearAll`
+  没有外部调用点（靠每周期自检兜底）。
+
+---
+
 ## 1.4.0 — 角色武器与技能体系 2.0
 
 按 `docs/武器技能设计-2.0.md` 落地。规模：**9 角色 / 20 武器（新增 3）/ 61 技能 / 8 组组合技**。

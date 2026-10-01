@@ -106,7 +106,13 @@ public class MeleeSmashSkill implements Skill {
 
         for (LivingEntity target : targets) {
             // 子类钩子：兑现类技能（echo_consume）在这里按目标身上的前置状态放大伤害
-            double finalDamage = damage * bonusMultiplier(context, target);
+            double multiplier = bonusMultiplier(context, target);
+            double finalDamage = damage * multiplier;
+            if (multiplier > 1.0D) {
+                // 兑现反馈：不给提示的话，玩家根本不知道 echo-bonus 到底生效没有
+                plugin.fx().actionBar(player, plugin.config().messages().get("skill.echo-consume",
+                        "bonus", Math.round(multiplier * 100.0D)));
+            }
             target.damage(finalDamage, player);
             plugin.damageNumbers().hit(player, target, finalDamage);   // 伤害数字（A1）
             if (knockback > 0.0D) {

@@ -50,6 +50,12 @@ public final class ShockwaveSkill implements Skill {
         double minFalloff = Math.max(0.0D, Math.min(1.0D, context.dbl("min-falloff", 0.5D)));
         int slowDuration = context.integer("slow-duration", 0);
         int freezeTicks = context.integer("freeze-ticks", 0);
+        // 2.0：冲击波也能挂状态——辉夜重锤给易伤、雷的震旗给破甲（此前白名单收了但没人读）
+        double markBonus = context.dbl("mark-bonus", 0.0D);
+        int markTicks = context.integer("mark-ticks", 80);
+        double armorPierce = context.dbl("armor-pierce", 0.0D);
+        int debuffTicks = context.integer("debuff-ticks", 100);
+        int debuffStacks = context.integer("debuff-stacks", 1);
 
         Location center = player.getLocation();
         int hit = 0;
@@ -85,6 +91,12 @@ public final class ShockwaveSkill implements Skill {
             }
             if (freezeTicks > 0) {
                 applyFreeze(living, freezeTicks);
+            }
+            if (markBonus > 0.0D) {
+                plugin.states().mark(living.getUniqueId(), markTicks, markBonus);
+            }
+            if (armorPierce > 0.0D) {
+                plugin.states().armorBreak(living.getUniqueId(), debuffTicks, armorPierce, debuffStacks);
             }
             hit++;
         }

@@ -95,6 +95,10 @@ public final class ProjectileListener implements Listener {
                 double echoBonus = skill.echoBonusOf(projectile);
                 double echoMultiplier = echoBonus > 1.0D
                         && SkillTargets.hasConsumableState(plugin, living) ? echoBonus : 1.0D;
+                if (echoMultiplier > 1.0D && shooter instanceof Player echoOwner) {
+                    plugin.fx().actionBar(echoOwner, plugin.config().messages().get("skill.echo-consume",
+                            "bonus", Math.round(echoMultiplier * 100.0D)));
+                }
                 double applied = damage * falloff * echoMultiplier;
                 applyDamage(living, applied, shooter);
                 if (shooter instanceof Player owner) {

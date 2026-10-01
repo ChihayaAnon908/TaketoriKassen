@@ -1493,6 +1493,29 @@ public final class GameRoom {
         baseMarker.stop();
         clearSkillProjectiles();
         clearDroppedItems();
+        clearSummons();
+    }
+
+    /**
+     * 清掉本房间世界里的召唤物（带 {@code summoned_owner} 标记的实体）。
+     *
+     * <p>世界卸载虽然也会带走它们，但玩家中途退场时房间还在，狗会继续自己找目标咬人；
+     * 所以结算收尾与房间回收都要主动清一遍。</p>
+     */
+    private void clearSummons() {
+        for (String worldName : roomWorlds()) {
+            World world = Bukkit.getWorld(worldName);
+            if (world == null) {
+                continue;
+            }
+            for (org.bukkit.entity.Entity entity : world.getEntities()) {
+                if (entity.getPersistentDataContainer()
+                        .get(com.taketori.kassen.paper.item.PDCKeys.summonedOwner(),
+                                org.bukkit.persistence.PersistentDataType.STRING) != null) {
+                    entity.remove();
+                }
+            }
+        }
     }
 
     /**

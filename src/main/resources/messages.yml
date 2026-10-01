@@ -55,6 +55,7 @@ skill:
   armor-break: '<green>破甲 <white>{count}</white> 个目标 <gray>（受到伤害 +{bonus}%，持续 {seconds} 秒）'
   zone-ready: '<green>领域已展开 <gray>（持续 {seconds} 秒）'
   summon-ready: '<green>忠犬已就位 <gray>（存活 {seconds} 秒）'
+  echo-consume: '<gold>兑现！<gray>目标带着前置状态，本次伤害 ×{bonus}%'
   mirror-ready: '<light_purple>镜面展开：<white>{time}s'
   guard-ready: '<aqua>强化防御：<white>{time}s'
   grapple-miss: '<gray>钢丝落空。'

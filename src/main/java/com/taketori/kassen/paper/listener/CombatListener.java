@@ -126,7 +126,13 @@ public final class CombatListener implements Listener {
             return;
         }
         double bonus = plugin.states().markBonus(victim.getUniqueId());
+        // 破甲（目标挨打更疼）与进攻窗口（攻击者打人更疼）取 max 而不是连乘：
+        // 否则"自己开了壁垒 + 对面正好被破甲"会叠出双倍穿透。
         double pierce = plugin.states().armorPierce(victim.getUniqueId());
+        Player attacker = attackerOf(event);
+        if (attacker != null) {
+            pierce = Math.max(pierce, plugin.states().offensePierce(attacker.getUniqueId()));
+        }
         if (bonus <= 0.0D && pierce <= 0.0D) {
             return;
         }
@@ -134,6 +140,18 @@ public final class CombatListener implements Listener {
         event.setDamage(event.getDamage() * multiplier);
         debug(String.format("%s 易伤 +%.0f%% / 破甲 +%.0f%% → 本次伤害 ×%.2f",
                 victim.getName(), bonus * 100.0D, pierce * 100.0D, multiplier));
+    }
+
+    /** 从伤害事件里取出"攻击者玩家"（直接近战或弹体射手），取不到返回 null。 */
+    private Player attackerOf(EntityDamageByEntityEvent event) {
+        if (event.getDamager() instanceof Player player) {
+            return player;
+        }
+        if (event.getDamager() instanceof Projectile projectile
+                && projectile.getShooter() instanceof Player shooter) {
+            return shooter;
+        }
+        return null;
     }
 
     /**

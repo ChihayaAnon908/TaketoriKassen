@@ -37,6 +37,14 @@ public final class SummonAllySkill implements Skill {
             "WOLF", "CAT", "PARROT", "SNOW_GOLEM", "IRON_GOLEM");
 
     private final TaketoriPlugin plugin;
+    /**
+     * 每个 owner 的"到期回收"任务句柄。
+     *
+     * <p>必须持有并在重召时取消：否则 t=0 召唤、t=6s 重召时，<b>第一个</b>任务会在 t=12s
+     * 把新那只也一起删掉（实际存活只有 6 秒）。</p>
+     */
+    private final java.util.Map<UUID, org.bukkit.scheduler.BukkitTask> expiryTasks =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public SummonAllySkill(TaketoriPlugin plugin) {
         this.plugin = plugin;
@@ -125,7 +133,7 @@ public final class SummonAllySkill implements Skill {
         }
 
         // 到期自动回收（不依赖实体自身的存活判断，房间清场时也会兜底）
-        plugin.scheduler().runLater(() -> removeOwned(owner), durationTicks);
+        expiryTasks.put(owner, plugin.scheduler().runLater(() -> removeOwned(owner), durationTicks));
 
         plugin.fx().particle(context.str("particle", "CLOUD"), origin, 20, 0.4D);
         plugin.fx().sound(context.str("sound", "ENTITY_WOLF_GROWL"), origin, 1.0F, 1.0F);
@@ -138,6 +146,10 @@ public final class SummonAllySkill implements Skill {
     public void removeOwned(UUID owner) {
         if (owner == null) {
             return;
+        }
+        org.bukkit.scheduler.BukkitTask pending = expiryTasks.remove(owner);
+        if (pending != null) {
+            pending.cancel();
         }
         String key = owner.toString();
         for (org.bukkit.World world : plugin.getServer().getWorlds()) {

@@ -38,6 +38,12 @@ public final class ShieldGuardSkill implements Skill {
 
         plugin.states().setDefense(player.getUniqueId(), duration, reflection, absorption, context.weapon().id());
 
+        // 2.0：壁垒窗口内自身造成的伤害提升（armor-pierce，0 = 关闭）
+        double armorPierce = context.dbl("armor-pierce", 0.0D);
+        if (armorPierce > 0.0D) {
+            plugin.states().setOffense(player.getUniqueId(), duration, armorPierce);
+        }
+
         // 壁垒模式的取舍：用机动换硬度（给自己挂缓慢）
         int selfSlow = Math.max(0, context.integer("self-slow-amplifier", 0));
         if (selfSlow > 0) {
