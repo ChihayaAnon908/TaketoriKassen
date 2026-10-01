@@ -2,7 +2,7 @@
 
 超时空辉夜姬「竹取合战」的 Minecraft 服务端复刻插件。
 
-**9 名角色 · 17 把武器 · 15 种技能**，用原版事件接管按键做出技能战斗层，再叠上 **3v3 积分赛** 与 **PVE 月人入侵**两种玩法，含完整的大厅、**动态房间匹配（月之都制）**、观战与跨局战绩流程。
+**9 名角色 · 20 把武器 · 20 种技能**，用原版事件接管按键做出技能战斗层，再叠上 **3v3 积分赛** 与 **PVE 月人入侵**两种玩法，含完整的大厅、**动态房间匹配（月之都制）**、观战与跨局战绩流程。武器之间能打出「挂标记 → 兑现」式的组合技。
 
 | 项 | 说明 |
 | --- | --- |
@@ -18,7 +18,7 @@
 
 ### 战斗层
 
-- **17 把武器 / 9 名角色 / 15 种技能类型**，全部数值外置在 `weapons.yml`、`characters.yml`，游戏内也能改（`/taketori editor`）。
+- **20 把武器 / 9 名角色 / 20 种技能类型**，全部数值外置在 `weapons.yml`、`characters.yml`，游戏内也能改（`/taketori editor`）。
 - **四个按键槽**：左键 / 右键 / 第三槽 / Q，逐槽独立冷却；屏幕上方 BossBar 冷却进度条。
 - **第三槽触发键可配**：默认双击潜行键，也可换成潜行 + Q、双击右键、F 键、潜行 + 右键，支持多选。
 - **模式切换**：Q 在武器模式间循环（锤击 ⇄ 火箭、近战 ⇄ 远程、镜面 ⇄ 爆发…），真源在玩家档案。
@@ -26,6 +26,12 @@
 - **身份与防伪**：PDC 记录角色 / 武器 / 模式 / 实例 / 归属；绑定武器不能放进箱子，也不会被他人捡走。
 - **版本适配**：属性 / 粒子 / 音效 / 药水效果的名字统一走 `VersionAdapter` 的注册表解析，改名不生效只告警不崩服。
 - **打击反馈**：动作栏伤害数字汇总（近战 / 弹体 / 强化箭 / 范围技能）、冷却就绪提示音、连击层数可视化、重技能 title 演出；弹道支持软吸附（`homing-strength`，默认关闭）；近战蓄力门控（`combat.melee-charge-gate`）奖励攻击节奏；技能释放自动挥手。
+- **四种状态机制**（2.0，让武器之间能打出组合技）：
+  - **易伤标记**：被标记者受到的所有伤害提高（`mark-bonus`），是「先挂标再爆发」的公共前置；
+  - **破甲**：与易伤**独立乘区**、可同时存在，结算为 `×(1+标记) ×(1+破甲)`，破甲硬上限 30%；
+  - **兑现**：带 `echo-bonus` 的技能或弹体，打在**带标记 / 破甲 / 减速 / 冻结**的目标身上时放大伤害，命中会在动作栏报「兑现！」；
+  - **场地与召唤**：领域类技能（治疗场 / 丝网陷阱）周期结算；召唤物带归属标记，队友与召唤者打不到它、击杀不计分。
+- **组合技**：9 个角色各有 1 组连携（如辉夜「月铃挂易伤 → 火箭锤兑现」、八千代「旗鱼冻结 → 月镜爆发」），共 8 组，全部由上面四种机制自然涌现，不需要额外配置。
 
 ### 玩法层
 
@@ -67,7 +73,7 @@
 3. 控制台出现下面这行即加载成功：
 
 ```
-TaketoriKassen v1.2.1 已启用：17 把武器 / 9 个角色 / 15 种技能类型（适配层 default）
+TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类型（适配层 default）
 ```
 
 | 权限 | 默认 | 用途 |
@@ -304,15 +310,17 @@ TaketoriKassen v1.2.1 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 
 | 分组 | 武器 id |
 | --- | --- |
-| 辉夜 | `kaguya_hammer` |
+| 辉夜 | `kaguya_hammer`、`kaguya_bell` |
 | 帝 | `mikado_konbo`、`mikado_odachi` |
-| 彩叶 | `iroha_sword`、`iroha_wire` |
+| 彩叶 | `iroha_sword`、`iroha_wire`、`iroha_kunai` |
 | 乃依 | `noi_bow`、`noi_dagger` |
 | 雷 | `rai_shield`、`rai_banner` |
 | 八千代 | `moon_mirror`、`frozen_swordfish` |
-| 宅公 | `takumi_fang`、`takumi_collar` |
+| 宅公 | `takumi_fang`、`takumi_collar`、`takumi_iron_fang` |
 | 真实 | `masami_gun`、`masami_lens` |
 | 芦花 | `ashika_reed`、`ashika_thread` |
+
+三把武器的角色也用快捷栏 1 / 2 / 3 切换（`input.weapon-slots` 默认已是 `[0,1,2,3]`，无需改配置）。
 
 ### 4.3 3v3 积分赛
 
@@ -484,10 +492,14 @@ TaketoriKassen v1.2.1 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 
 ### 数值文件（插件不会覆盖）
 
-- `weapons.yml`：全部武器数值与技能参数。`attack-damage` / `attack-speed` 写的是**最终值**；`modes.<MODE>.skills` 会整段替换武器级同名槽位；写错的参数键会在启动时被配置校验点名。
+- `weapons.yml`：全部武器数值与技能参数。`attack-damage` / `attack-speed` 写的是**最终值**；`modes.<MODE>.skills` 会整段替换武器级同名槽位；写错的参数键会在启动时被配置校验点名。**当前模板版本 `config-version: 10`**（2.0 的武器与技能体系）。
 - `characters.yml`：角色血量、移速、武器列表与描述。
 - `messages.yml`：所有提示文案（新键会自动回填默认值）。
+- 战斗数值全部在这两个文件里，**没有硬编码**：改完 `/taketori reload` 即生效。
+  （唯一例外是场地技能的参数在**施法瞬间快照**，热重载从下一次施法开始生效。）
 - 插件升级后如果控制台提示「你的 weapons.yml 是模板 v…」，说明内置模板更新了；同步方式是备份并删除该文件后 `/taketori reload` 重新生成。
+
+武器与技能的完整设计（每个角色每把武器每个槽位的数值、8 组组合技、伤害基线）见 **[docs/武器技能设计-2.0.md](docs/武器技能设计-2.0.md)**。
 
 ---
 
@@ -527,11 +539,14 @@ java -cp "build/check;build/classes" WorldScopeTest
 src/main/java/com/taketori/kassen/
 ├─ core/        纯 Java 逻辑（角色 / 武器 / 技能定义、对局规则、世界范围判定），禁止引用 Bukkit
 ├─ paper/       Bukkit 适配（监听器、技能实现、GUI、命令、对局与大堂管理）
+│  ├─ skill/impl/   技能实现，一个类对应 weapons.yml 里的一个 type（20 种）
+│  └─ skill/SkillTargets.java  技能选目标的公共判定（友伤保护 / 范围 / 视线锥 / 前置状态）
 ├─ version/     版本差异收口（属性 / 粒子 / 音效 / 药水的注册表解析）
 ├─ config/      配置加载、校验与迁移
 └─ data/        持久化（YAML 存档：角色绑定、隐性标签、跨局战绩）
 src/main/resources/
 ├─ plugin.yml / config.yml / weapons.yml / characters.yml / messages.yml
+docs/           多世界配置说明、武器与技能设计 2.0
 tools/          离线测试与校验器（无需启动服务器）
 build-offline.ps1  无网络环境的构建脚本
 ```
