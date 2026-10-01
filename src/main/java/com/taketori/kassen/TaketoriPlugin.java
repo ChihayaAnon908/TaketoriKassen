@@ -529,6 +529,23 @@ public final class TaketoriPlugin extends JavaPlugin {
         giveCharacterWeapons(player, characterId);
     }
 
+    /**
+     * 解除玩家的角色：清掉随之而来的武器与属性，<b>但保留隐性标签</b>。
+     *
+     * <p>与 {@code bindCharacter(player, null)} 的区别在于存储层：那条路走
+     * {@code dataStore.remove(uuid)}，会把隐性标签一并删掉。对局结算这种「只该脱掉角色」的
+     * 场景必须用本方法——标签是玩家资产，不该因为打完一局就没了。</p>
+     */
+    public void unbindCharacter(Player player) {
+        if (player == null) {
+            return;
+        }
+        config.characters().unbind(player.getUniqueId());
+        dataStore.setCharacterId(player.getUniqueId(), null);
+        clearCharacterWeapons(player);
+        resetCharacterAttributes(player);
+    }
+
     /** 按角色定义发放武器到预留槽位，并应用角色属性。 */
     public void giveCharacterWeapons(Player player, String characterId) {
         var character = config.characters().get(characterId);

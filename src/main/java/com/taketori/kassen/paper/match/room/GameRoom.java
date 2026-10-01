@@ -5,6 +5,7 @@ import com.taketori.kassen.core.match.MatchRules;
 import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.core.worlds.WorldScope;
 import com.taketori.kassen.paper.match.ArenaDef;
+import com.taketori.kassen.paper.match.BaseMarker;
 import com.taketori.kassen.paper.match.BaseCaptureManager;
 import com.taketori.kassen.paper.match.CuboidRegion;
 import com.taketori.kassen.paper.match.LootSpawner;
@@ -118,11 +119,18 @@ public final class GameRoom {
     private final CageBuilder cage = new CageBuilder(this);
     /** 对局区域四周屏障墙（每局重建/还原）。 */
     private final BarrierBuilder barrier = new BarrierBuilder(this);
+    /** 双方基地的队伍颜色粒子标记（仅 PVP 对局启用）。 */
+    private final BaseMarker baseMarker = new BaseMarker(this);
 
     // ---- 进房封存（BedWars2020 PlayerGoods 式全量快照）：自带背包/状态封存，结算或退房返还 ----
     private final Map<UUID, InventorySnapshot> backups = new HashMap<>();
     /** 整局成员缓存（membersCache 双轨）：掉线移出 teams 后仍保留，用于结算名单。 */
     private final Map<UUID, TeamId> rosterCache = new HashMap<>();
+    /**
+     * 开局时各参赛者的角色快照：结算清理只清「角色仍与本局一致」的人。玩家中途离队后到别处
+     * 重新选了角色，那是他的新状态，不能被本局结算顺手抹掉（武器/属性一并清就更严重了）。
+     */
+    private final Map<UUID, String> roleSnapshot = new HashMap<>();
     /** 对局缺人（可补位）持续的起始时刻；补满即清零，超过宽限期无人补位 → 缺人队判负。 */
     private long understaffedSinceMillis;
 
@@ -726,7 +734,8 @@ public final class GameRoom {
             // 顶替：解除对方的角色（他需要重新选一个）
             Player holderPlayer = Bukkit.getPlayer(holder);
             if (holderPlayer != null) {
-                plugin.bindCharacter(holderPlayer, null);
+                // 用 unbindCharacter 而不是 bindCharacter(null)：后者会连隐性标签一起删掉
+                plugin.unbindCharacter(holderPlayer);
             } else {
                 plugin.config().characters().unbind(holder);
                 plugin.dataStore().setCharacterId(holder, null);
@@ -758,7 +767,8 @@ public final class GameRoom {
             taken.put(key, keeper);
             Player loserPlayer = Bukkit.getPlayer(loser);
             if (loserPlayer != null) {
-                plugin.bindCharacter(loserPlayer, null);
+                // 同上：解除角色不能顺手删掉隐性标签
+                plugin.unbindCharacter(loserPlayer);
             } else {
                 plugin.config().characters().unbind(loser);
                 plugin.dataStore().setCharacterId(loser, null);
@@ -1007,6 +1017,9 @@ public final class GameRoom {
         // 重建整局成员缓存：最终名单 + 最终队伍（结算时掉线队友也按此判定胜方）
         rosterCache.clear();
         rosterCache.putAll(teams);
+        // 角色快照必须取在 enforceUniqueRoles 之前：裁决会临时解绑失败者的角色，
+        // 但「本局他到底用没用角色」应按开局那一刻算，否则裁决下来的人反而不被清。
+        snapshotRoles();
 
         resetScores();
         endedAt = 0L;
@@ -1226,6 +1239,7 @@ public final class GameRoom {
         loot.start();
         if (isPve()) {
             baseCapture.stop();   // PVE 没有敌方基地要拆
+            baseMarker.stop();    // 也没有「双方基地」要标
             String outpostError = outpost.start(plugin.pveSettings());
             if (outpostError != null) {
                 plugin.getLogger().warning("[pve] 房间 " + id() + " 据点未能生成：" + outpostError);
@@ -1233,6 +1247,7 @@ public final class GameRoom {
             }
         } else {
             baseCapture.start();
+            baseMarker.start();
             outpost.stop();
         }
         board.updateAll();
@@ -1465,6 +1480,7 @@ public final class GameRoom {
         outpost.stop();
         loot.stop();
         baseCapture.stop();
+        baseMarker.stop();
         clearSkillProjectiles();
         clearDroppedItems();
     }
@@ -1703,6 +1719,12 @@ public final class GameRoom {
         stopComponents();
 
         List<UUID> members = new ArrayList<>(teams.keySet());
+        // 对局结束清掉参赛者的角色选择：取「整局成员缓存 ∪ 当前队伍」而不是只取 teams——
+        // 掉线/中途退出的人已经从 teams 里移除了，但角色仍留在数据层，不清就会在他们
+        // 下次进服时被 restoreOnlinePlayers 原样恢复出来。
+        Set<UUID> roleHolders = new LinkedHashSet<>(rosterCache.keySet());
+        roleHolders.addAll(teams.keySet());
+        clearRoles(new ArrayList<>(roleHolders));
         // 只清旁观本房的观众（退回大厅）；其他房间的观众不受影响
         plugin.spectator().clearAudienceOfRoom(this);
         boolean returnToLobby = plugin.config().lobbyReturnAfterMatch();
@@ -1739,6 +1761,57 @@ public final class GameRoom {
             plugin.getLogger().info("[room " + id() + "] 结算收尾完成，房间即将销毁并回收世界");
         }
         manager.destroyRoom(this, false);
+    }
+
+    /**
+     * 对局结束清掉参赛者的角色选择（含已掉线者），下一局由玩家重新选。
+     *
+     * <p>只解绑角色、<b>不动隐性标签</b>：这里走 {@code setCharacterId(uuid, null)}（语义是
+     * 「只解除角色，保留标签」，见 {@link com.taketori.kassen.data.YamlPlayerDataStore}），
+     * 而不是 {@code dataStore.remove(uuid)}——后者会把标签一起删掉。</p>
+     */
+    private void clearRoles(List<UUID> members) {
+        for (UUID uuid : members) {
+            if (roleChangedSinceStart(uuid)) {
+                continue;   // 他离队后已在别处重新选了角色：那是新状态，不动
+            }
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null && player.isOnline()) {
+                plugin.unbindCharacter(player);   // 角色 + 武器 + 属性，且保留隐性标签
+                continue;
+            }
+            // 离线者：只能清数据层。属性挂在在线 Player 上，他下次上线读不到角色就不会再绑定；
+            // 武器由背包返还（在线）或重连返还（离线）兜底。
+            plugin.config().characters().unbind(uuid);
+            plugin.dataStore().setCharacterId(uuid, null);
+        }
+        roleSnapshot.clear();
+        // 立刻落盘：否则服务器崩溃/被强杀后 players.yml 里仍是旧角色，下次启动又被恢复出来
+        plugin.dataStore().saveAll();
+    }
+
+    /** 开局时记录每个参赛者的角色，供结算判断「这个角色是不是本局的」。 */
+    private void snapshotRoles() {
+        roleSnapshot.clear();
+        for (UUID uuid : rosterCache.keySet()) {
+            roleSnapshot.put(uuid, plugin.dataStore().characterIdOf(uuid));
+        }
+    }
+
+    /**
+     * 该玩家的角色是否已与开局时不同。中途离队（{@code /taketori leave}）后可以立刻加入别的
+     * 房间并重新选角色——那种情况下本局结算不该动他：清角色是小事，连武器和属性一起清掉
+     * 会把他在新对局里正在用的东西抹掉。
+     *
+     * <p>不在快照里的人（中途补位加入等）按「需要清」处理。</p>
+     */
+    private boolean roleChangedSinceStart(UUID uuid) {
+        if (!roleSnapshot.containsKey(uuid)) {
+            return false;
+        }
+        String snapshot = roleSnapshot.get(uuid);
+        String current = plugin.dataStore().characterIdOf(uuid);
+        return snapshot == null ? current != null : !snapshot.equals(current);
     }
 
     /**
