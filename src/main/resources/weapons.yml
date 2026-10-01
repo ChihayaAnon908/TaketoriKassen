@@ -397,7 +397,6 @@ weapons:
           combo-window: 20     # 连击窗口 1 秒：1 秒内没有新的命中 → 伤害衰减回基础值 10
           combo-cap: 20.0      # 连击叠伤上限：不管叠到多少段，单击伤害不超过 20
           echo-bonus: 1.4      # 目标带标记 / 破甲 / 减速 / 冰冻时 ×1.4（被 combo-cap 封顶）
-          echo-ticks: 100      # 兑现提示持续 5 秒
           particle: SWEEP_ATTACK
           sound: ENTITY_PLAYER_ATTACK_SWEEP
       right:
@@ -712,6 +711,7 @@ weapons:
               duration-ticks: 100
               speed-multiplier: 1.0
               absorption: 4.0
+              reflect-ratio: 0.2      # 近战反制：被贴脸时反弹 20% 伤害
               particle: END_ROD
               sound: BLOCK_GLASS_BREAK
       BURST:
@@ -727,6 +727,7 @@ weapons:
               slow-duration: 80
               slow-amplifier: 1
               blindness-ticks: 40
+              echo-bonus: 1.4         # 兑现：目标被冰冻/减速/标记/破甲时 ×1.4 → 19.6
               particle: END_ROD
               sound: BLOCK_GLASS_BREAK
     skills:
@@ -750,9 +751,9 @@ weapons:
           duration-ticks: 100
           speed-multiplier: 1.0
           absorption: 4.0
-          # 设计文档 2.6 想在镜面展开上追加 reflect-ratio 0.2（反制窗口内近战也少量反弹），
-          # 但 reflect 类型不支持该参数键（reflect-ratio 只属于 shield_guard / mirror_skill），
-          # 写了会被启动校验拦下并点名 —— 因此这里按现有键集合配置，缺口见交付说明。
+          # 近战反制：窗口内被贴脸打中时，把 20% 伤害反弹给攻击者
+          # （只反飞行物的话，镜面一被近身就完全失效）
+          reflect-ratio: 0.2
           particle: END_ROD
           sound: BLOCK_GLASS_BREAK
       shift-right:
@@ -1046,7 +1047,6 @@ weapons:
           knockback: 0.5
           # 2.0：目标身上有破甲时 ×1.5 → 27.0 配置值（对铁甲 9.5，满血打不穿）
           echo-bonus: 1.5
-          echo-ticks: 100
           particle: CRIT
           sound: BLOCK_ANVIL_LAND
       q:
@@ -1355,7 +1355,6 @@ weapons:
           slow-duration: 40
           # 2.0：目标身上有减速 / 破甲时 ×1.6 → 24.0 配置值（对铁甲 8.4）
           echo-bonus: 1.6
-          echo-ticks: 100
           particle: CRIT
           sound: ENTITY_WOLF_GROWL
 
@@ -1434,7 +1433,6 @@ weapons:
           knockback: 0.35
           # 2.0：目标带标记时 ×1.6 → 25.6 配置值（对铁甲 9.0）
           echo-bonus: 1.6
-          echo-ticks: 100
           particle: END_ROD
           hit-particle: CRIT
           sound: ITEM_TRIDENT_THROW
@@ -1582,7 +1580,6 @@ weapons:
           knockback: 0.2
           # 2.0：目标被减速 / 束缚时 ×1.6 → 12.8，与丝线形成组合
           echo-bonus: 1.6
-          echo-ticks: 80
           particle: SWEEP_ATTACK
           sound: ENTITY_PLAYER_ATTACK_SWEEP
       right:

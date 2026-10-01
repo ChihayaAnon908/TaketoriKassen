@@ -35,8 +35,11 @@ public final class ReflectSkill implements Skill {
         int duration = context.integer("duration-ticks", 100);
         double speedMultiplier = context.dbl("speed-multiplier", 1.0D);
         double absorption = context.dbl("absorption", 0.0D);
+        // 2.0：近战反制比例——窗口内被贴脸打中时按比例反弹，否则镜面一被近身就失效
+        double reflectRatio = context.dbl("reflect-ratio", 0.0D);
 
-        plugin.states().setReflection(player.getUniqueId(), duration, speedMultiplier, context.weapon().id());
+        plugin.states().setReflection(player.getUniqueId(), duration, speedMultiplier, reflectRatio,
+                context.weapon().id());
         if (absorption > 0.0D) {
             player.setAbsorptionAmount(player.getAbsorptionAmount() + absorption);
         }

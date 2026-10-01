@@ -90,6 +90,8 @@ public final class ProjectileSkill implements Skill {
         pdc.set(PDCKeys.projMarkBonus(), PersistentDataType.DOUBLE, context.dbl("mark-bonus", 0.0D));
         pdc.set(PDCKeys.projMarkTicks(), PersistentDataType.INTEGER, context.integer("mark-ticks", 80));
         pdc.set(PDCKeys.projArmorPierce(), PersistentDataType.DOUBLE, context.dbl("armor-pierce", 0.0D));
+        pdc.set(PDCKeys.projArmorPierceTicks(), PersistentDataType.INTEGER,
+                context.integer("armor-pierce-ticks", 100));
 
         plugin.fx().sound(context.str("sound", "ENTITY_SNOWBALL_THROW"), player, 0.8F, 1.0F);
         plugin.fx().particle(context.str("particle", "CRIT"), spawn, 5, 0.12D);
@@ -242,6 +244,13 @@ public final class ProjectileSkill implements Skill {
     public double armorPierceOf(Projectile projectile) {
         Double value = projectile.getPersistentDataContainer().get(PDCKeys.projArmorPierce(), PersistentDataType.DOUBLE);
         return value == null ? 0.0D : value;
+    }
+
+    /** 命中时挂的破甲时长（tick）；与 mark-ticks 独立，互不影响。 */
+    public int armorPierceTicksOf(Projectile projectile) {
+        Integer value = projectile.getPersistentDataContainer()
+                .get(PDCKeys.projArmorPierceTicks(), PersistentDataType.INTEGER);
+        return value == null ? 100 : value;
     }
 
     public String hitSoundOf(Projectile projectile) {

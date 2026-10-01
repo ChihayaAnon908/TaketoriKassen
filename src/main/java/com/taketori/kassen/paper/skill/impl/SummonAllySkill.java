@@ -100,8 +100,6 @@ public final class SummonAllySkill implements Skill {
             }
             var pdc = ally.getPersistentDataContainer();
             pdc.set(PDCKeys.summonedOwner(), PersistentDataType.STRING, owner.toString());
-            pdc.set(PDCKeys.summonedExpire(), PersistentDataType.LONG,
-                    System.currentTimeMillis() + durationTicks * 50L);
 
             if (ally instanceof Tameable tameable) {
                 tameable.setTamed(true);

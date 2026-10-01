@@ -111,7 +111,8 @@ public final class ProjectileListener implements Listener {
                 }
                 double armorPierce = skill.armorPierceOf(projectile);
                 if (armorPierce > 0.0D) {
-                    plugin.states().armorBreak(living.getUniqueId(), skill.markTicksOf(projectile),
+                    // 破甲时长走自己的键：此前复用 mark-ticks，导致"只想挂破甲"时被标记时长绑架
+                    plugin.states().armorBreak(living.getUniqueId(), skill.armorPierceTicksOf(projectile),
                             armorPierce, 1);
                 }
                 if (ignite && igniteTicks > 0) {

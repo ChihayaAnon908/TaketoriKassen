@@ -96,7 +96,8 @@ public final class ArmorBreakSkill implements Skill {
                 "count", targets.size(),
                 "bonus", Math.round(Math.min(com.taketori.kassen.paper.state.CombatStates.MAX_ARMOR_PIERCE,
                         pierce) * 100.0D),
-                "seconds", debuffTicks / 20));
+                "seconds", debuffTicks / 20,
+                "stacks", stacks));
         return SkillResult.SUCCESS;
     }
 }

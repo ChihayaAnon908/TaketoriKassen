@@ -4,6 +4,7 @@ import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.paper.skill.Skill;
 import com.taketori.kassen.paper.skill.SkillContext;
 import com.taketori.kassen.paper.skill.SkillResult;
+import com.taketori.kassen.paper.skill.SkillTargets;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -40,6 +41,8 @@ public final class MirrorBurstSkill implements Skill {
         int slowDuration = context.integer("slow-duration", 80);
         int slowAmplifier = Math.max(0, context.integer("slow-amplifier", 1));
         int blindnessTicks = context.integer("blindness-ticks", 40);
+        // 2.0：兑现——对已被冰冻 / 减速 / 标记 / 破甲的目标追加伤害（与旗鱼组成"冰封后镜爆"）
+        double echoBonus = context.dbl("echo-bonus", 1.0D);
 
         Location center = player.getLocation();
         int affected = 0;
@@ -48,9 +51,15 @@ public final class MirrorBurstSkill implements Skill {
                 continue;
             }
             affected++;
-            if (damage > 0.0D) {
-                living.damage(damage, player);
-                plugin.damageNumbers().hit(player, living, damage);   // 伤害数字（A1）
+            double applied = damage;
+            if (echoBonus > 1.0D && SkillTargets.hasConsumableState(plugin, living)) {
+                applied = damage * echoBonus;
+                plugin.fx().actionBar(player, plugin.config().messages().get("skill.echo-consume",
+                        "bonus", Math.round(echoBonus * 100.0D)));
+            }
+            if (applied > 0.0D) {
+                living.damage(applied, player);
+                plugin.damageNumbers().hit(player, living, applied);   // 伤害数字（A1）
             }
             apply(living, "SLOWNESS", slowDuration, slowAmplifier);
             apply(living, "BLINDNESS", blindnessTicks, 0);

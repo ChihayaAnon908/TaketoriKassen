@@ -52,7 +52,7 @@ input:
 skill:
   no-target: '<gray>没有可牵引的目标。'
   mark-apply: '<green>易伤标记 <white>{count}</white> 个目标 <gray>（受到伤害 +{bonus}%，持续 {seconds} 秒）'
-  armor-break: '<green>破甲 <white>{count}</white> 个目标 <gray>（受到伤害 +{bonus}%，持续 {seconds} 秒）'
+  armor-break: '<green>破甲 <white>{count}</white> 个目标 <gray>（受到伤害 +{bonus}%，持续 {seconds} 秒 · {stacks} 层）'
   zone-ready: '<green>领域已展开 <gray>（持续 {seconds} 秒）'
   summon-ready: '<green>忠犬已就位 <gray>（存活 {seconds} 秒）'
   echo-consume: '<gold>兑现！<gray>目标带着前置状态，本次伤害 ×{bonus}%'

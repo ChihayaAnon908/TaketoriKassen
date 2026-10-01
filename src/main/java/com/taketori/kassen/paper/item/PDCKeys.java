@@ -49,12 +49,8 @@ public final class PDCKeys {
     private static NamespacedKey arrowDebuffAmplifier;
     private static NamespacedKey arrowDebuffChance;
 
-    /** 召唤物归属（UUID 字符串）：用于友伤拦截、同队判定与结算不计分。 */
+    /** 召唤物归属（UUID 字符串）：用于友伤拦截、同队判定、结算不计分与房间清理。 */
     private static NamespacedKey summonedOwner;
-    /** 召唤物到期时间（毫秒时间戳）：房间清理时也据此兜底移除。 */
-    private static NamespacedKey summonedExpire;
-    /** 场地技能归属（UUID 字符串）：玩家退出 / 房间销毁时按它清理名下的领域。 */
-    private static NamespacedKey zoneOwner;
 
     /** 弹体的兑现倍率：命中时目标身上有前置状态则放大伤害。 */
     private static NamespacedKey projEchoBonus;
@@ -63,6 +59,8 @@ public final class PDCKeys {
     private static NamespacedKey projMarkTicks;
     /** 弹体命中时给目标挂的破甲强度。 */
     private static NamespacedKey projArmorPierce;
+    /** 弹体命中时挂的破甲时长（tick）——与 mark-ticks 分开，两者可以独立配。 */
+    private static NamespacedKey projArmorPierceTicks;
 
     private PDCKeys() {
     }
@@ -103,13 +101,12 @@ public final class PDCKeys {
         arrowDebuffChance = new NamespacedKey(plugin, "arrow_debuff_chance");
 
         summonedOwner = new NamespacedKey(plugin, "summoned_owner");
-        summonedExpire = new NamespacedKey(plugin, "summoned_expire");
-        zoneOwner = new NamespacedKey(plugin, "zone_owner");
 
         projEchoBonus = new NamespacedKey(plugin, "proj_echo_bonus");
         projMarkBonus = new NamespacedKey(plugin, "proj_mark_bonus");
         projMarkTicks = new NamespacedKey(plugin, "proj_mark_ticks");
         projArmorPierce = new NamespacedKey(plugin, "proj_armor_pierce");
+        projArmorPierceTicks = new NamespacedKey(plugin, "proj_armor_pierce_ticks");
     }
 
     public static NamespacedKey characterId() {
@@ -253,16 +250,6 @@ public final class PDCKeys {
         return summonedOwner;
     }
 
-    /** 召唤物到期时间（毫秒时间戳）。 */
-    public static NamespacedKey summonedExpire() {
-        return summonedExpire;
-    }
-
-    /** 场地技能归属（UUID 字符串）。 */
-    public static NamespacedKey zoneOwner() {
-        return zoneOwner;
-    }
-
     /** 弹体的兑现倍率（>1 时命中带前置状态的目标会放大伤害）。 */
     public static NamespacedKey projEchoBonus() {
         return projEchoBonus;
@@ -281,5 +268,10 @@ public final class PDCKeys {
     /** 弹体命中时施加的破甲强度。 */
     public static NamespacedKey projArmorPierce() {
         return projArmorPierce;
+    }
+
+    /** 弹体命中时施加的破甲时长（tick）。 */
+    public static NamespacedKey projArmorPierceTicks() {
+        return projArmorPierceTicks;
     }
 }

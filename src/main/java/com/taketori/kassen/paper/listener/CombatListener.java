@@ -212,6 +212,37 @@ public final class CombatListener implements Listener {
         debug(victim.getName() + " 的镜面把 " + projectile.getType() + " 弹了回去");
     }
 
+    /**
+     * 镜面反制（近战）：反射窗口内被近战打中时，按 {@code reflect-ratio} 把伤害反弹给攻击者。
+     *
+     * <p>没有这一条时，月镜的镜面模式一被贴脸就完全失效（它只反飞行物）。反弹用内部伤害
+     * 标记包住，避免双方都开镜面时无限对弹。</p>
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onReflectMelee(EntityDamageByEntityEvent event) {
+        if (!(event.getEntity() instanceof Player victim)
+                || !(event.getDamager() instanceof Player attacker)) {
+            return;   // 只处理"玩家近战打玩家"；飞行物走 onReflectProjectile
+        }
+        CombatStates.Reflection reflection = plugin.states().reflection(victim.getUniqueId());
+        if (reflection == null || reflection.reflectRatio() <= 0.0D) {
+            return;
+        }
+        double back = event.getDamage() * reflection.reflectRatio();
+        if (back <= 0.0D) {
+            return;
+        }
+        plugin.markInternalDamage(attacker.getUniqueId());
+        try {
+            attacker.damage(back, victim);
+        } finally {
+            plugin.unmarkInternalDamage(attacker.getUniqueId());
+        }
+        plugin.fx().particle("ENCHANTED_HIT", attacker.getLocation().add(0.0D, 1.0D, 0.0D), 10, 0.3D);
+        debug(String.format("%s 的镜面把 %.1f 点近战伤害反弹给 %s",
+                victim.getName(), back, attacker.getName()));
+    }
+
     /** 插件弹体的原版撞击/爆炸伤害一律取消，只由命中监听器结算一次。 */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onSkillProjectileDamage(EntityDamageByEntityEvent event) {

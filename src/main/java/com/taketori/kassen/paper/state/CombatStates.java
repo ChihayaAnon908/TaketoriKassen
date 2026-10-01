@@ -23,8 +23,14 @@ public final class CombatStates {
         }
     }
 
-    /** 反射窗口：期间把来袭的飞行物弹回发射者。 */
-    public record Reflection(long untilMillis, double speedMultiplier, String source) {
+    /**
+     * 反射窗口：期间把来袭的飞行物弹回发射者。
+     *
+     * <p>{@code reflectRatio} 是**近战反制**比例：窗口内被近战打中时，按这个比例把伤害反弹给
+     * 攻击者（0 = 只反飞行物，不反近战）。给月镜的 MIRROR 模式用——否则被贴脸时整个技能
+     * 等于失效。</p>
+     */
+    public record Reflection(long untilMillis, double speedMultiplier, double reflectRatio, String source) {
 
         public boolean expired() {
             return System.currentTimeMillis() >= untilMillis;
@@ -142,12 +148,19 @@ public final class CombatStates {
     // ---------------------------------------------------------------- 反射窗口（月镜）
 
     public void setReflection(UUID uuid, int durationTicks, double speedMultiplier, String source) {
+        setReflection(uuid, durationTicks, speedMultiplier, 0.0D, source);
+    }
+
+    /** 带近战反制比例的版本（{@code reflectRatio > 0} 时窗口内被近战打中会反弹伤害）。 */
+    public void setReflection(UUID uuid, int durationTicks, double speedMultiplier,
+                              double reflectRatio, String source) {
         if (uuid == null || durationTicks <= 0) {
             return;
         }
         reflections.put(uuid, new Reflection(
                 System.currentTimeMillis() + durationTicks * 50L,
                 Math.max(0.2D, speedMultiplier),
+                Math.max(0.0D, reflectRatio),
                 source));
     }
 
