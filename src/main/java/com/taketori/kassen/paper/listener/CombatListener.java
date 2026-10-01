@@ -9,6 +9,8 @@ import com.taketori.kassen.paper.item.ItemFactory;
 import com.taketori.kassen.paper.item.PDCKeys;
 import com.taketori.kassen.paper.skill.impl.ProjectileSkill;
 import com.taketori.kassen.paper.state.CombatStates;
+import org.bukkit.GameMode;
+import org.bukkit.Material;
 import org.bukkit.entity.Arrow;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -17,9 +19,12 @@ import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityShootBowEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
@@ -195,15 +200,76 @@ public final class CombatListener implements Listener {
         if (!(event.getEntity() instanceof Player player)) {
             return;
         }
-        ItemStack bow = event.getBow();
-        ItemFactory.Identity identity = plugin.items().read(bow);
-        if (identity == null) {
-            return;
-        }
-        WeaponDef weapon = plugin.config().weapons().get(identity.weaponId());
+        WeaponDef weapon = pluginWeaponOf(event.getBow());
         if (weapon == null) {
             return;
         }
+        double damageMultiplier = tagArrow(player, weapon, event.getProjectile());
+        scheduleVolley(player, weapon, event.getProjectile().getVelocity().clone(), damageMultiplier);
+    }
+
+    /**
+     * 没有箭也能射（乃依的弓靠它实现「无箭射击」）。
+     *
+     * <p>原版在背包里没有箭时<b>根本不会发射</b>——连 {@link EntityShootBowEvent} 都不触发，
+     * 所以只能在右键这一刻接管：手持插件弓 + 手里没箭 → 手动放一支箭，并走与普通射击
+     * 完全相同的标记与三连射逻辑；有箭时什么都不做，照旧交给原版。</p>
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBowWithoutArrow(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
+        Action action = event.getAction();
+        if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        Player player = event.getPlayer();
+        if (player.getGameMode() == GameMode.CREATIVE) {
+            return;   // 创造模式原版就能射，不必我们操心
+        }
+        ItemStack hand = player.getInventory().getItemInMainHand();
+        if (hand.getType() != Material.BOW) {
+            return;
+        }
+        WeaponDef weapon = pluginWeaponOf(hand);
+        if (weapon == null) {
+            return;   // 只给插件弓这个待遇，普通弓照原版
+        }
+        if (hasAnyArrow(player)) {
+            return;   // 有箭：走原版 EntityShootBowEvent
+        }
+        // 按满蓄力箭的速度补射（原版满蓄约 3.0），方向取视线
+        Arrow arrow = player.launchProjectile(Arrow.class,
+                player.getEyeLocation().getDirection().multiply(3.0D));
+        double damageMultiplier = tagArrow(player, weapon, arrow);
+        scheduleVolley(player, weapon, arrow.getVelocity().clone(), damageMultiplier);
+        debug("└ 无箭射击：背包里没有箭，按插件弓规则补射一支");
+    }
+
+    /** 读出手里这把弓绑定的插件武器；不是插件武器返回 null。 */
+    private WeaponDef pluginWeaponOf(ItemStack stack) {
+        ItemFactory.Identity identity = plugin.items().read(stack);
+        if (identity == null) {
+            return null;
+        }
+        return plugin.config().weapons().get(identity.weaponId());
+    }
+
+    /** 背包（含副手）里有没有任何可用的箭。 */
+    private boolean hasAnyArrow(Player player) {
+        var inventory = player.getInventory();
+        return inventory.contains(Material.ARROW)
+                || inventory.contains(Material.SPECTRAL_ARROW)
+                || inventory.contains(Material.TIPPED_ARROW);
+    }
+
+    /**
+     * 把这一箭的附加效果写到箭上：命中减益（所有箭都吃）+ 特殊射击强化（速度 / 伤害 / 易伤 / 范围）。
+     *
+     * @return 伤害倍率，供三连射的后续箭矢继承
+     */
+    private double tagArrow(Player player, WeaponDef weapon, Entity projectile) {
         PlayerProfile profile = plugin.config().characters().profile(player.getUniqueId());
         String mode = profile.mode(weapon.id(), weapon.defaultMode());
         SkillDef def = weapon.skill(SkillSlot.SHIFT_RIGHT, mode);
@@ -211,19 +277,17 @@ public final class CombatListener implements Listener {
         debug(String.format("%s 射箭 weapon=%s mode=%s 特殊射击开关=%s shift-right绑定=%s",
                 player.getName(), weapon.id(), mode, profile.specialShot(), def.isPresent()));
 
-        double damageMultiplier = 1.0D;
-
         // ③ 命中附加效果：把"随机负面效果"的名单写到箭上，命中时才抽签（乃依的压制手段）
         //    这一条与特殊射击、三连射都无关，所以放在最前面，普通箭也吃得到
-        tagArrowDebuffs(event.getProjectile(), weapon);
+        tagArrowDebuffs(projectile, weapon);
 
         // ① 特殊射击：需要 shift-right 绑定技能 + 开关已开
         if (def.isPresent() && profile.specialShot()) {
             double speedMultiplier = def.dbl("speed-multiplier", 1.15D);
-            damageMultiplier = def.dbl("damage-multiplier", 1.5D);
-            event.getProjectile().setVelocity(event.getProjectile().getVelocity().multiply(speedMultiplier));
+            double damageMultiplier = def.dbl("damage-multiplier", 1.5D);
+            projectile.setVelocity(projectile.getVelocity().multiply(speedMultiplier));
 
-            var pdc = event.getProjectile().getPersistentDataContainer();
+            var pdc = projectile.getPersistentDataContainer();
             pdc.set(PDCKeys.arrowMultiplier(), PersistentDataType.DOUBLE, damageMultiplier);
 
             double markBonus = def.dbl("mark-bonus", 0.0D);
@@ -237,24 +301,30 @@ public final class CombatListener implements Listener {
                 pdc.set(PDCKeys.arrowHitRatio(), PersistentDataType.DOUBLE, def.dbl("hit-radius-ratio", 0.3D));
             }
 
-            plugin.fx().particle(def.str("particle", "CRIT"), event.getProjectile().getLocation(), 20, 0.3D);
+            plugin.fx().particle(def.str("particle", "CRIT"), projectile.getLocation(), 20, 0.3D);
             plugin.fx().sound(def.str("sound", "BLOCK_BEACON_ACTIVATE"), player, 0.8F, 1.6F);
             // 飞行拖尾：让"这一箭被强化了"肉眼可辨（否则玩家感觉不到特殊射击生效）
-            startTrail(event.getProjectile(), def.str("trail-particle", "CRIT"));
+            startTrail(projectile, def.str("trail-particle", "CRIT"));
 
             debug(String.format("└ 特殊射击生效：速度 ×%.2f 伤害 ×%.2f 易伤 +%.0f%% 命中半径 %.1f",
                     speedMultiplier, damageMultiplier, markBonus * 100.0D, hitRadius));
+            return damageMultiplier;
         }
+        return 1.0D;
+    }
 
-        // ② 三连射：只看模式，与 shift-right 是否绑定无关
+    /** ② 三连射：只看模式，与 shift-right 是否绑定无关。 */
+    private void scheduleVolley(Player player, WeaponDef weapon, Vector base, double damageMultiplier) {
+        PlayerProfile profile = plugin.config().characters().profile(player.getUniqueId());
+        String mode = profile.mode(weapon.id(), weapon.defaultMode());
         int extraArrows = "VOLLEY".equalsIgnoreCase(mode) ? VOLLEY_EXTRA_ARROWS : 0;
         if (extraArrows <= 0) {
             return;
         }
+        SkillDef def = weapon.skill(SkillSlot.SHIFT_RIGHT, mode);
         // 间隔连发 + 微小散布：同一 tick 同向发射的话三支箭完全重叠，看起来只有一支
         int interval = Math.max(0, def.isPresent() ? def.integer("volley-interval", 2) : 2);
         double spreadDegrees = Math.max(0.0D, def.isPresent() ? def.dbl("volley-spread", 1.5D) : 1.5D);
-        Vector base = event.getProjectile().getVelocity().clone();
         double multiplier = damageMultiplier;
 
         for (int i = 1; i <= extraArrows; i++) {

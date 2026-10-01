@@ -67,6 +67,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.ArrayList;
@@ -606,32 +607,31 @@ public final class TaketoriPlugin extends JavaPlugin {
     }
 
     /**
-     * 开局护甲：把配置指定的套装<b>放进背包</b>（默认全套铁甲 + 保护 II）。
+     * 开局护甲：把配置指定的套装<b>直接穿在身上</b>（默认全套铁甲 + 保护 II + 不可破坏）。
      *
-     * <p>不直接替换装备槽 —— 那会把玩家自己穿的护甲顶掉（在别的世界、别的玩法里也照顶），
-     * 也等于替玩家做了"穿哪套"的决定。改成 addItem 后由玩家自己决定穿不穿；
-     * 背包满时提示一句，不静默丢东西。把 {@code loadout.armor-material} 写成 NONE
-     * 或关掉 {@code loadout.armor-enabled} 就完全跳过。附魔按注册名 {@code protection} 解析。</p>
+     * <p>开局流程会先 {@code stashAndClearInventory} 封存并清空背包，所以这里的替换不会顶掉
+     * 玩家自己的装备——他原来的护甲连同整背包都在快照里，结算时原样返还。</p>
+     *
+     * <p>护甲带 {@code unbreakable} 标记：对局装备不该被耐久打断，否则打到一半甲碎了等于
+     * 白送对手优势。把 {@code loadout.armor-material} 写成 NONE 或关掉
+     * {@code loadout.armor-enabled} 就完全跳过。附魔按注册名 {@code protection} 解析。</p>
      */
     private void giveLoadoutArmor(Player player) {
         if (!config.loadoutArmorEnabled()) {
             return;
         }
         String set = config.loadoutArmorMaterial();
-        List<ItemStack> pieces = new ArrayList<>();
-        for (String piece : List.of("HELMET", "CHESTPLATE", "LEGGINGS", "BOOTS")) {
-            Material material = armorMaterial(set, piece);
+        // Bukkit 的 setArmorContents 约定顺序固定为 [靴子, 护腿, 胸甲, 头盔]
+        List<String> pieces = List.of("BOOTS", "LEGGINGS", "CHESTPLATE", "HELMET");
+        ItemStack[] armor = new ItemStack[pieces.size()];
+        for (int i = 0; i < pieces.size(); i++) {
+            Material material = armorMaterial(set, pieces.get(i));
             if (material == null) {
                 return;   // 材质解析失败（armorMaterial 已经打过日志）；NONE 也会走到这里
             }
-            pieces.add(armorPiece(material, config.loadoutArmorProtection()));
+            armor[i] = armorPiece(material, config.loadoutArmorProtection());
         }
-        Map<Integer, ItemStack> leftover = player.getInventory().addItem(pieces.toArray(new ItemStack[0]));
-        if (!leftover.isEmpty()) {
-            player.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage()
-                    .deserialize("<yellow>背包已满，有 " + leftover.size()
-                            + " 件开局护甲没能发放<gray>（清出空位后可由管理员重新指定角色补发）"));
-        }
+        player.getInventory().setArmorContents(armor);
     }
 
     /** 把套装前缀拼成某个槽位的材质名（IRON + HELMET → IRON_HELMET）。 */
@@ -651,7 +651,7 @@ public final class TaketoriPlugin extends JavaPlugin {
         return material;
     }
 
-    /** 造一件护甲，可选附带保护附魔（等级按附魔自身的上限截断）。 */
+    /** 造一件护甲：可选保护附魔（等级按附魔自身的上限截断）+ 不可破坏标记。 */
     private ItemStack armorPiece(Material material, int protectionLevel) {
         ItemStack stack = new ItemStack(material);
         if (protectionLevel > 0) {
@@ -659,6 +659,12 @@ public final class TaketoriPlugin extends JavaPlugin {
             if (protection != null) {
                 stack.addUnsafeEnchantment(protection, Math.min(protectionLevel, protection.getMaxLevel()));
             }
+        }
+        ItemMeta meta = stack.getItemMeta();
+        if (meta != null) {
+            // 对局装备不该被耐久打断：甲碎在半场等于白送对手优势
+            meta.setUnbreakable(true);
+            stack.setItemMeta(meta);
         }
         return stack;
     }

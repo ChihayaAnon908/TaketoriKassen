@@ -396,7 +396,8 @@ weapons:
     material: BOW
     model-data: 0
     lore:
-      - '<gray>左键 / 右键 <white>原版蓄力射击'
+      - '<gray>左键 / 右键 <white>蓄力射击'
+      - '<gray>无箭也能射 <dark_gray>（右键即发，不消耗箭）'
       - '<gray>Shift+右键 <white>切换特殊射击（强化 + 易伤标记）'
       - '<gray>Q <white>单发射击 / 三连射'
       - '<gray>命中 <white>随机附加一种负面效果（减速 / 虚弱 / 中毒…）'
