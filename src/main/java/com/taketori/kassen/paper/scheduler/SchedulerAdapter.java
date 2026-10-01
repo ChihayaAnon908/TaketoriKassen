@@ -45,11 +45,14 @@ public final class SchedulerAdapter {
         handle[0] = track(Bukkit.getScheduler().runTask(plugin, () -> runAndRelease(handle, task)));
     }
 
-    /** 延迟执行（tick）。 */
-    public void runLater(Runnable task, long delayTicks) {
+    /**
+     * 延迟执行（tick）。返回任务句柄：执行完自动出列；调用方如需提前取消可持有它。
+     */
+    public BukkitTask runLater(Runnable task, long delayTicks) {
         BukkitTask[] handle = new BukkitTask[1];
         handle[0] = track(Bukkit.getScheduler().runTaskLater(plugin,
                 () -> runAndRelease(handle, task), Math.max(0L, delayTicks)));
+        return handle[0];
     }
 
     /**

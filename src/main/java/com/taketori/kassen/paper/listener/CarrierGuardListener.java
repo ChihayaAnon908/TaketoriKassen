@@ -77,23 +77,32 @@ public final class CarrierGuardListener implements Listener {
         if (!plugin.config().soulbound()) {
             return;
         }
-        if (!(event.getWhoClicked() instanceof Player)) {
+        if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
+        }
+        // 只在"打开了容器"时限制：玩家在自己背包里整理物品不该被拦
+        var top = event.getView().getTopInventory();
+        if (top.getHolder() instanceof org.bukkit.inventory.PlayerInventory) {
+            return;
+        }
+        // HOTBAR_SWAP：被交换的是快捷栏 / 副手物品，既不在 currentItem 也不在 cursor，
+        // 必须按 hotbarButton 显式检查，否则数字键（1-9 / F）能把绑定武器塞进容器。
+        if (event.getAction() == org.bukkit.event.inventory.InventoryAction.HOTBAR_SWAP
+                && event.getClickedInventory() != null && event.getClickedInventory().equals(top)) {
+            int button = event.getHotbarButton();
+            ItemStack hotbarItem = button >= 0
+                    ? player.getInventory().getItem(button)
+                    : player.getInventory().getItemInOffHand();
+            if (isSoulbound(hotbarItem)) {
+                event.setCancelled(true);
+            }
             return;
         }
         ItemStack moved = event.getCurrentItem();
         if (!plugin.items().isPluginWeapon(moved)) {
             moved = event.getCursor();
         }
-        if (!plugin.items().isPluginWeapon(moved)) {
-            return;
-        }
-        ItemFactory.Identity identity = plugin.items().read(moved);
-        if (identity == null || !identity.soulbound()) {
-            return;
-        }
-        // 只在"打开了容器"时限制：玩家在自己背包里整理物品不该被拦
-        var top = event.getView().getTopInventory();
-        if (top.getHolder() instanceof org.bukkit.inventory.PlayerInventory) {
+        if (!isSoulbound(moved)) {
             return;
         }
         if (event.getClickedInventory() != null && event.getClickedInventory().equals(top)) {
@@ -103,6 +112,36 @@ public final class CarrierGuardListener implements Listener {
         if (event.getAction().name().startsWith("MOVE_TO_OTHER_INVENTORY") || event.getClick().isShiftClick()) {
             event.setCancelled(true);
         }
+    }
+
+    /** 拖拽（InventoryDragEvent）同样会把物品分布进容器，与点击同规则拦截。 */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onInventoryDrag(org.bukkit.event.inventory.InventoryDragEvent event) {
+        if (!plugin.config().soulbound()) {
+            return;
+        }
+        if (!(event.getWhoClicked() instanceof Player)) {
+            return;
+        }
+        var top = event.getView().getTopInventory();
+        if (top.getHolder() instanceof org.bukkit.inventory.PlayerInventory) {
+            return;
+        }
+        if (!isSoulbound(event.getOldCursor())) {
+            return;
+        }
+        // 拖拽落点只要有一个在容器槽（raw slot 小于顶层库存大小）即取消整场拖拽
+        for (int rawSlot : event.getRawSlots()) {
+            if (rawSlot < top.getSize()) {
+                event.setCancelled(true);
+                return;
+            }
+        }
+    }
+
+    private boolean isSoulbound(ItemStack stack) {
+        ItemFactory.Identity identity = plugin.items().read(stack);
+        return identity != null && identity.soulbound();
     }
 
     /** 绑定武器不能被别人捡走。 */

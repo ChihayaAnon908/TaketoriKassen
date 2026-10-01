@@ -33,7 +33,7 @@ public class WeaponYamlEditorTest {
 
         // 1) 读现有值
         expect("读 damage", "10.0", editor.currentValue(List.of("iroha_sword", "skills", "left", "params", "damage")));
-        expect("读 combo-cap", "30.0", editor.currentValue(List.of("iroha_sword", "skills", "left", "params", "combo-cap")));
+        expect("读 combo-cap", "20.0", editor.currentValue(List.of("iroha_sword", "skills", "left", "params", "combo-cap")));
         expect("读带引号的字符串", "'剑击'", editor.currentValue(List.of("iroha_sword", "skills", "left", "params", "display")));
         expect("读列表值", "[ SLOWNESS, WEAKNESS, POISON, BLINDNESS, HUNGER, NAUSEA ]",
                 editor.currentValue(List.of("noi_bow", "hit-effects", "arrow-debuffs")));

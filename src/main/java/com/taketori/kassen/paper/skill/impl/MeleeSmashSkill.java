@@ -1,6 +1,7 @@
 package com.taketori.kassen.paper.skill.impl;
 
 import com.taketori.kassen.TaketoriPlugin;
+import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.paper.skill.Skill;
 import com.taketori.kassen.paper.skill.SkillContext;
 import com.taketori.kassen.paper.skill.SkillResult;
@@ -66,6 +67,11 @@ public final class MeleeSmashSkill implements Skill {
                         + String.format("%.2f", damage)
                         + (cap > 0.0D ? "（上限 " + String.format("%.0f", cap) + "）" : ""));
             }
+            // 连击可视化（C11）：叠上第 2 段起在动作栏报层数
+            if (stacks > 0) {
+                plugin.fx().actionBar(player, net.kyori.adventure.text.minimessage.MiniMessage.miniMessage()
+                        .deserialize("<yellow>连击 <white>×" + (stacks + 1) + "</white> <gray>伤害提升"));
+            }
         }
         double range = context.dbl("range", 3.0D);
         double knockback = context.dbl("knockback", 0.35D);
@@ -81,8 +87,11 @@ public final class MeleeSmashSkill implements Skill {
             if (!(entity instanceof LivingEntity living) || entity.equals(player) || living.isDead()) {
                 continue;
             }
-            if (entity instanceof Player other && other.getGameMode().name().equals("SPECTATOR")) {
-                continue;
+            if (entity instanceof Player other) {
+                if (other.getGameMode().name().equals("SPECTATOR")
+                        || isProtectedTeammate(player, other)) {
+                    continue;
+                }
             }
             Vector toTarget = living.getLocation().add(0.0D, living.getHeight() * 0.5D, 0.0D)
                     .toVector().subtract(eye.toVector());
@@ -97,6 +106,7 @@ public final class MeleeSmashSkill implements Skill {
 
         for (LivingEntity target : targets) {
             target.damage(damage, player);
+            plugin.damageNumbers().hit(player, target, damage);   // 伤害数字（A1）
             if (knockback > 0.0D) {
                 Vector push = target.getLocation().toVector().subtract(player.getLocation().toVector());
                 push.setY(0.0D);
@@ -122,6 +132,23 @@ public final class MeleeSmashSkill implements Skill {
             plugin.fx().sound(context.str("miss-sound", "ENTITY_PLAYER_ATTACK_WEAK"), player, 0.4F, 1.2F);
         }
         return SkillResult.SUCCESS;
+    }
+
+    /**
+     * 对方是不是"受友伤保护的同队队友"：是则整个目标跳过——
+     * 伤害事件会被友伤处理器取消，但击退 / 减速 / 定身等控制效果不会，必须在此拦截。
+     */
+    private boolean isProtectedTeammate(Player caster, Player other) {
+        var room = plugin.rooms().roomOf(caster);
+        if (room == null || !room.isFriendlyFireProtected()) {
+            return false;
+        }
+        if (plugin.rooms().roomOf(other) != room) {
+            return false;
+        }
+        TeamId casterTeam = room.teamOf(caster.getUniqueId());
+        TeamId otherTeam = room.teamOf(other.getUniqueId());
+        return casterTeam != null && casterTeam == otherTeam;
     }
 
     private void applySlow(SkillContext context, LivingEntity target, int durationTicks) {

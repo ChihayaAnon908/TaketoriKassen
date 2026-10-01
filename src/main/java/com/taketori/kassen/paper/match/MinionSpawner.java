@@ -216,6 +216,12 @@ public final class MinionSpawner {
         return entity != null && minions.contains(entity.getUniqueId());
     }
 
+    /** 实体是否归本刷怪器（普通或精英月人，死亡归属路由用）。 */
+    public boolean isTracked(Entity entity) {
+        return entity != null
+                && (minions.contains(entity.getUniqueId()) || elites.contains(entity.getUniqueId()));
+    }
+
     /** 是不是精英月人（掉落与提示可以区分）。 */
     public boolean isElite(Entity entity) {
         return entity != null && elites.contains(entity.getUniqueId());

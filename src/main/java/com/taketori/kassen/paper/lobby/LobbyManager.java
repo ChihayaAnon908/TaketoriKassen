@@ -39,6 +39,17 @@ public final class LobbyManager {
     private CuboidRegion region;
     private Location spawn;
     private final List<LobbySign> signs = new CopyOnWriteArrayList<>();
+    /** 实时房间状态牌（绑定模板；文本每秒刷新，点击直接加入/旁观/创建）。 */
+    private final List<StatusSign> statusSigns = new CopyOnWriteArrayList<>();
+
+    /** 实时房间状态牌：绑定模板 id 的一个告示牌坐标。 */
+    public record StatusSign(String world, int x, int y, int z, String templateId) {
+
+        public boolean matches(Block block) {
+            return block.getWorld().getName().equals(world)
+                    && block.getX() == x && block.getY() == y && block.getZ() == z;
+        }
+    }
 
     public LobbyManager(TaketoriPlugin plugin) {
         this.plugin = plugin;
@@ -49,6 +60,7 @@ public final class LobbyManager {
 
     public void load() {
         signs.clear();
+        statusSigns.clear();   // 重载同样要清空状态牌，否则同一块牌子随重载次数重复累积
         region = null;
         spawn = null;
         if (!file.exists()) {
@@ -76,6 +88,18 @@ public final class LobbyManager {
                 }
             }
         }
+        ConfigurationSection statusSection = yaml.getConfigurationSection("status-signs");
+        if (statusSection != null) {
+            for (String key : statusSection.getKeys(false)) {
+                ConfigurationSection section = statusSection.getConfigurationSection(key);
+                if (section == null || !section.isString("world") || !section.isString("template")) {
+                    continue;
+                }
+                statusSigns.add(new StatusSign(section.getString("world"),
+                        section.getInt("x"), section.getInt("y"), section.getInt("z"),
+                        section.getString("template")));
+            }
+        }
         plugin.getLogger().info("已载入大厅：出生点 " + (spawn == null ? "未设置" : "已设置")
                 + " / 告示牌 " + signs.size() + " 个");
     }
@@ -97,6 +121,15 @@ public final class LobbyManager {
         int index = 0;
         for (LobbySign sign : signs) {
             sign.write(yaml.createSection("signs." + (index++)));
+        }
+        int statusIndex = 0;
+        for (StatusSign sign : statusSigns) {
+            ConfigurationSection section = yaml.createSection("status-signs." + (statusIndex++));
+            section.set("world", sign.world());
+            section.set("x", sign.x());
+            section.set("y", sign.y());
+            section.set("z", sign.z());
+            section.set("template", sign.templateId());
         }
         try {
             File parent = file.getParentFile();
@@ -160,7 +193,156 @@ public final class LobbyManager {
     }
 
     public boolean removeSignAt(Block block) {
-        return signs.removeIf(sign -> sign.matches(block));
+        boolean actionRemoved = signs.removeIf(sign -> sign.matches(block));
+        boolean statusRemoved = statusSigns.removeIf(sign -> sign.matches(block));
+        if (actionRemoved || statusRemoved) {
+            save();
+        }
+        return actionRemoved || statusRemoved;
+    }
+
+    // ---------------------------------------------------------------- 实时状态牌
+
+    public List<StatusSign> statusSigns() {
+        return List.copyOf(statusSigns);
+    }
+
+    /** 准星所指的状态牌；不是状态牌返回 null。 */
+    public StatusSign statusSignAt(Block block) {
+        for (StatusSign sign : statusSigns) {
+            if (sign.matches(block)) {
+                return sign;
+            }
+        }
+        return null;
+    }
+
+    /** 注册实时状态牌并立即保存（同一坐标重复添加时覆盖旧模板）。 */
+    public StatusSign addStatusSignAndSave(String world, int x, int y, int z, String templateId) {
+        StatusSign sign = new StatusSign(world, x, y, z, templateId);
+        statusSigns.removeIf(existing -> existing.world().equals(world)
+                && existing.x() == x && existing.y() == y && existing.z() == z);
+        statusSigns.add(sign);
+        save();
+        return sign;
+    }
+
+    /** 状态牌展示的房间：该模板下第一个可加入（等待/倒计时）的房；没有则第一个进行中的房。 */
+    private GameRoom statusTargetRoom(String templateId) {
+        GameRoom fallback = null;
+        for (GameRoom room : plugin.rooms().rooms()) {
+            if (!room.templateId().equals(templateId)) {
+                continue;
+            }
+            GameRoom.Phase phase = room.phase();
+            if (phase == GameRoom.Phase.WAITING || phase == GameRoom.Phase.STARTING) {
+                return room;
+            }
+            if (fallback == null && phase != GameRoom.Phase.ENDING) {
+                fallback = room;
+            }
+        }
+        return fallback;
+    }
+
+    /** 状态牌点击：等待房加入、进行中观战（有缺口则补位）、无房创建。 */
+    public void clickStatusSign(Player player, String templateId) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        GameRoom room = statusTargetRoom(templateId);
+        if (room == null) {
+            createRoom(player, templateId);
+            return;
+        }
+        GameRoom.Phase phase = room.phase();
+        if (phase == GameRoom.Phase.WAITING || phase == GameRoom.Phase.STARTING) {
+            joinRoom(player, room.id());
+            return;
+        }
+        if (phase == GameRoom.Phase.CAGED || phase == GameRoom.Phase.PLAYING) {
+            if (plugin.rooms().roomOf(player) == null && room.reinforcementTeam() != null) {
+                joinRoom(player, room.id());
+                return;
+            }
+            if (plugin.spectator().isAudience(player)) {
+                plugin.spectator().leaveAudience(player);
+                return;
+            }
+            plugin.spectator().enterAudience(player, room.spectatorViewPoint(), room);
+            player.sendMessage(plugin.config().messages().get("room.spectating", "room", room.display()));
+            return;
+        }
+        player.sendMessage(MINI.deserialize("<gray>该房间正在结算，很快会回到等待状态，稍后再试。"));
+    }
+
+    /** 每秒刷新全部状态牌文本（由主类计时器驱动；牌子被破坏时自动从列表摘除）。 */
+    public void refreshStatusSigns() {
+        for (StatusSign sign : statusSigns) {
+            org.bukkit.World world = org.bukkit.Bukkit.getWorld(sign.world());
+            if (world == null) {
+                continue;
+            }
+            Block block = world.getBlockAt(sign.x(), sign.y(), sign.z());
+            if (!(block.getState() instanceof org.bukkit.block.Sign signState)) {
+                // 牌子已被破坏或坐标被替换为别的方块：条目失效，自动摘除
+                // （旧逻辑只在空气时摘除，替换成实体方块的旧条目会永久残留）
+                statusSigns.removeIf(existing -> existing.matches(block));
+                continue;
+            }
+            GameRoom room = statusTargetRoom(sign.templateId());
+            String[] lines = statusLines(sign.templateId(), room);
+            org.bukkit.block.sign.Side front = org.bukkit.block.sign.Side.FRONT;
+            boolean changed = false;
+            for (int i = 0; i < 4; i++) {
+                if (!lines[i].equals(signState.getSide(front).getLine(i))) {
+                    changed = true;
+                }
+                signState.getSide(front).setLine(i, lines[i]);
+            }
+            if (changed) {
+                signState.update();
+            }
+        }
+    }
+
+    /** 状态牌四行文本（§ 色码）。 */
+    private String[] statusLines(String templateId, GameRoom room) {
+        String title = "§6§l[竹取合战]";
+        String mapLine = "§f" + templateId;
+        if (room == null) {
+            return new String[]{title, mapLine, "§7暂无房间", "§e▶ 点击创建"};
+        }
+        String stateLine;
+        String clickLine;
+        switch (room.phase()) {
+            case WAITING -> {
+                stateLine = "§a等待中 " + room.waitingCount() + "/" + room.maxPlayers();
+                clickLine = "§e▶ 点击加入";
+            }
+            case STARTING -> {
+                stateLine = "§e倒计时 " + room.countdownSeconds() + "s";
+                clickLine = "§e▶ 点击加入";
+            }
+            case CAGED -> {
+                stateLine = "§d开局准备";
+                clickLine = "§7已开始";
+            }
+            case PLAYING -> {
+                stateLine = "§c游戏中 " + room.onlineParticipantCount() + "/" + room.maxPlayers();
+                clickLine = "§b▶ 点击观战 / 补位";
+            }
+            default -> {
+                stateLine = "§7结算中";
+                clickLine = "§7请稍候";
+            }
+        }
+        return new String[]{title, mapLine, stateLine, clickLine};
+    }
+
+    /** 启动状态牌刷新任务（主类启用时调用，每秒刷新一次文本）。 */
+    public void startStatusTask() {
+        plugin.scheduler().runTimerTask(this::refreshStatusSigns, 20L, 20L);
     }
 
     // ---------------------------------------------------------------- 快速加入 / 离开房间
@@ -173,7 +355,48 @@ public final class LobbyManager {
         if (player == null || !player.isOnline()) {
             return;
         }
-        handleJoinResult(player, plugin.rooms().quickJoin(player), null);
+        RoomManager.JoinResult result = plugin.rooms().quickJoin(player);
+        if (result != null) {
+            handleJoinResult(player, result, null);
+            return;
+        }
+        // 没有任何房间：降临月之都——用默认模板自动建房并加入（异步完成后自动传送）
+        plugin.rooms().createDefaultAndJoin(player);
+    }
+
+    /**
+     * 创建房间（降临月之都）：用指定模板（null = 默认模板）异步复制出新世界，
+     * 完成后创建者自动进入等待区。所有玩家可用，受 room.max-rooms 上限约束。
+     */
+    public void createRoom(Player player, String templateId) {
+        plugin.rooms().createRoom(player, templateId);
+    }
+
+    /**
+     * 删除房间：房主可删自己的等待房，管理员（taketori.admin）可删任意等待房；
+     * 进行中的房间不在此删（先 /taketori match stop，结算完成后自动回收世界）。
+     */
+    public void deleteRoom(Player player, String roomId) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        GameRoom room = plugin.rooms().room(roomId);
+        if (room == null) {
+            player.sendMessage(plugin.config().messages().get("room.arena-not-found", "id", roomId));
+            return;
+        }
+        boolean owner = player.getUniqueId().equals(room.creatorId());
+        if (!owner && !player.hasPermission("taketori.admin")) {
+            player.sendMessage(plugin.config().messages().get("room.room-delete-denied"));
+            return;
+        }
+        if (room.phase() != GameRoom.Phase.WAITING) {
+            player.sendMessage(MINI.deserialize("<red>该房间已开局，不能直接删除。"
+                    + "<gray>先用 <white>/taketori match stop " + roomId + "</white> 结束，结算后自动回收世界。"));
+            return;
+        }
+        plugin.rooms().destroyRoom(room, true);
+        player.sendMessage(plugin.config().messages().get("room.room-deleted", "room", room.display()));
     }
 
     /** 加入指定房间（房间列表 GUI / 管理指令用）；等待中允许自动换房。 */
@@ -200,11 +423,15 @@ public final class LobbyManager {
             case ALREADY_IN, IN_GAME -> message(player, "room.already-in", "room", room.display());
             case FULL -> message(player, "room.room-full", "room", room.display());
             case STARTED -> message(player, "room.room-started");
+            case CREATED -> {
+                // 派对整队无房可装、已自动建房：createRoom 已发"正在复制"消息，这里不重复
+                // 房间建好后整队会被自动带进房（finishCreate 的派对跟进逻辑）
+            }
             case NOT_READY -> message(player, "room.list-not-ready",
                     "missing", room == null ? "" : room.arena().missingHint());
+            case REINFORCED -> message(player, "room.reinforced", "room", room.display());
             case NOT_FOUND -> message(player, "room.arena-not-found",
                     "id", requestedId == null ? "?" : requestedId);
-            case NO_ROOM -> message(player, "room.no-room");
         }
     }
 

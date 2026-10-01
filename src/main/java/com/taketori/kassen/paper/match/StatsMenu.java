@@ -160,7 +160,12 @@ public final class StatsMenu implements Listener {
             lore.add(MINI.deserialize("<yellow>点击在聊天栏查看详情"));
             meta.lore(lore);
             if (material == Material.PLAYER_HEAD && meta instanceof SkullMeta skull) {
-                skull.setOwningPlayer(Bukkit.getOfflinePlayer(row.name()));
+                // 只用非阻塞的本地缓存查询：Bukkit.getOfflinePlayer(String) 在 usercache
+                // 缺失该名字时会发起阻塞式 Web 查询，直接冻结主线程
+                org.bukkit.OfflinePlayer cached = Bukkit.getOfflinePlayerIfCached(row.name());
+                if (cached != null) {
+                    skull.setOwningPlayer(cached);
+                }
             }
         });
         return item;

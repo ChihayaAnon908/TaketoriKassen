@@ -2,7 +2,7 @@
 
 超时空辉夜姬「竹取合战」的 Minecraft 服务端复刻插件。
 
-**9 名角色 · 17 把武器 · 15 种技能**，用原版事件接管按键做出技能战斗层，再叠上 **3v3 积分赛** 与 **PVE 月人入侵**两种玩法，含完整的大厅、**多房间匹配**、观战与跨局战绩流程。
+**9 名角色 · 17 把武器 · 15 种技能**，用原版事件接管按键做出技能战斗层，再叠上 **3v3 积分赛** 与 **PVE 月人入侵**两种玩法，含完整的大厅、**动态房间匹配（月之都制）**、观战与跨局战绩流程。
 
 | 项 | 说明 |
 | --- | --- |
@@ -25,12 +25,14 @@
 - **载体护栏**：手持插件武器时不挖方块、不铲路、不去皮、不放置、不抛钩、不投掷、不丢弃、不换副手、不驯服实体。
 - **身份与防伪**：PDC 记录角色 / 武器 / 模式 / 实例 / 归属；绑定武器不能放进箱子，也不会被他人捡走。
 - **版本适配**：属性 / 粒子 / 音效 / 药水效果的名字统一走 `VersionAdapter` 的注册表解析，改名不生效只告警不崩服。
+- **打击反馈**：动作栏伤害数字汇总（近战 / 弹体 / 强化箭 / 范围技能）、冷却就绪提示音、连击层数可视化、重技能 title 演出；弹道支持软吸附（`homing-strength`，默认关闭）；近战蓄力门控（`combat.melee-charge-gate`）奖励攻击节奏；技能释放自动挥手。
 
 ### 玩法层
 
 - **3v3 积分赛**：600 分目标、20 分钟时限；击杀月人 `+3`、击杀玩家 `+10`、拆除基地 `+50`；基地占点读条 10 秒、开局 60 秒保护期。
 - **PVE 月人入侵**：所有人同一队打月人，含**保卫据点**、**五大波次精英潮**、**三档难度**与**精英随人数变强**（详见第四节）。
-- **多房间匹配（BedWars 式）**：一个服务器可配多个场地，每个启用场地一个可反复开局的房间，多房间并发互不干扰；「快速加入」自动进入等待人数最多的房间，**房间列表 GUI** 可选房加入、旁观进行中的对局；等待区倒计时（满员切短倒计时、掉人取消），开局瞬间分队并进出生点玻璃笼，结算后回大厅、房间立即可再匹配。
+- **动态房间制（月之都）**：房间由玩家按需创建——大厅「降临月之都」或 `/taketori room create` 异步复制模板世界（`moonmaps/`）为专属世界，结算完成后自动删除回收；「快速加入」三级回退（等待房 → 缺人对局补位 → 自动建房），**房间列表 GUI** 创建/加入/旁观/删除；进房即封存自带状态（背包/血量/药水/游戏模式），倒计时 90 秒（过半场 30 秒、满员 5 秒）；对局掉线有补位与判负缓冲。
+- **实时房间状态牌**：`/taketori lobby addstatus <模板id>` 绑定告示牌，每秒刷新该模板当前房间的状态与人数，点击直接加入 / 旁观 / 创建（无房时）。
 - **告示牌指向界面**：点击告示牌打开对应 GUI（玩家菜单 / 角色菜单 / 排行榜），具体操作由界面按钮完成；`join` / `leave` 直接执行匹配动作（快速加入 / 退房回大厅）。
 - **菜单时钟**：发给玩家的一个道具，右键打开玩家菜单（默认进服发放、丢不掉）。
 - **观众模式**：聊天栏给出可点击的「退出观战」按钮并定期重发；阵亡自动进入旁观（屏幕上方 **BossBar 显示复活倒计时**），倒计时结束回己方出生点复活。
@@ -53,16 +55,18 @@
 - **进服送大厅只接管白名单世界**（默认仅大厅出生点所在的世界，其它世界位置不变）；
 - **消息播报只发给消息所属世界**（对局播报 → 对局世界，大厅播报 → 大厅世界）。
 
+完整配置说明（模板世界 / 房间世界 / Multiverse 共存 / 排查表）见 **[docs/多世界配置.md](docs/多世界配置.md)**。
+
 ---
 
 ## 二、安装
 
-1. 把 `TaketoriKassen-1.1.0.jar` 放进服务端 `plugins/` 目录，重启服务器。
-2. 首次启动会在 `plugins/TaketoriKassen/` 生成 `config.yml`、`weapons.yml`、`characters.yml`、`messages.yml`。
+1. 把 `TaketoriKassen-1.2.1.jar` 放进服务端 `plugins/` 目录，重启服务器。
+2. 首次启动会在 `plugins/TaketoriKassen/` 生成 `config.yml`、`weapons.yml`、`characters.yml`、`messages.yml` 与模板目录 `moonmaps/`。
 3. 控制台出现下面这行即加载成功：
 
 ```
-TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类型（适配层 default）
+TaketoriKassen v1.2.1 已启用：17 把武器 / 9 个角色 / 15 种技能类型（适配层 default）
 ```
 
 | 权限 | 默认 | 用途 |
@@ -76,15 +80,45 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 
 ## 三、游戏内设置流程
 
-从装好插件到能开一局，按顺序做完这九步即可（全部在游戏内执行，不需要改文件）。
+从装好插件到能开一局，按顺序做完这十步即可（除第 1 步准备模板外，全部在游戏内执行）。
+第 2~6 步由**划场地会话**（`/taketori arena setup`）串起来：一次进入编辑世界，之后每划完一项
+会自动刷新「还缺什么」的清单。
 
-### 1. 领选区锄
+### 1. 准备月面模板
+
+模板是 `plugins/TaketoriKassen/moonmaps/<模板名>/` 下的一个世界文件夹（必须含 `level.dat`），
+三种来源任选其一：
+
+**a. 已有地图** —— 把世界文件夹整个复制进 `moonmaps/kaguya/`（`moonmaps/` 目录首启自动创建）。
+
+**b. 用服务器里已有的世界** —— 不必手动搬文件夹，直接导入：
 
 ```
-/taketori arena wand
+/taketori moonmap import <世界名> <场地id>
 ```
 
-### 2. 划月人刷新区
+世界正加载着也没关系，会先自动存盘再复制；导入完即可直接 `arena setup` 划定。
+
+**c. 手头没有地图、只想先试一局** —— 生成一张空白平坦模板：
+
+```
+/taketori moonmap create <模板名>
+```
+
+生成后会自动注册成场地定义，接着 `arena setup` 进去摆刷新区和基地即可。
+
+### 2. 开始划场地
+
+```
+/taketori arena setup kaguya       # 建场地（缺则建）+ 选中 + 载入编辑世界 + 列出还缺什么
+/taketori arena wand               # 领选区锄
+```
+
+`arena setup <场地id> [模板名]` 会把模板复制成编辑世界 `k_tpl_<模板名>` 并把你传送进去。
+模板名与场地 id 不同名时写全（`/taketori arena setup kaguya mymap`），收尾时会把
+`moonmaps/mymap/` 自动对齐改名为 `moonmaps/kaguya/`。
+
+### 3. 划月人刷新区
 
 用锄头**左键点区域一角**、**右键点对角**，然后：
 
@@ -96,7 +130,7 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 标签 `normal` = 只刷普通月人，`mixed` = 普通 + 精英（默认，也可直接改 arenas.yml 的
 `minion-regions.<编号>.kind`）。精英月人与 PVE 大波次只在 mixed 区刷新。
 
-### 3. 划双方基地
+### 4. 划双方基地
 
 每个基地都用锄头点两个对角，然后：
 
@@ -111,9 +145,9 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 
 每队数量由 `base.count-per-team` 决定（默认 3，可写 1~16 或 `auto` 表示以实际划定为定）；编号可省略，会自动接下一个空位。建议每个基地 5×5 以上。
 
-### 4. 设双方出生点与等待出生点
+### 5. 设双方出生点与等待出生点
 
-站到位置上执行（出生点用的是**你的站位**，不是选区）：
+站到位置上执行（`setspawn` 用的是**你的站位**，不是选区）：
 
 ```
 /taketori arena setspawn red
@@ -121,7 +155,36 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 /taketori arena setwait         # 中立等待出生点：匹配后玩家在此集结倒计时（未设置不能开局）
 ```
 
-### 5. 设大厅
+`setwait` 多一条规则：**手上还留着选区时**，它会把整片选区设成「等待区」（加入者在区域内
+随机分布），而不是单点。想设单点就先 `/taketori arena clearselection` 清掉选区再执行；
+两种情况都不会漏掉「等待出生点」这个必设项。
+
+### 6. 收尾保存
+
+```
+/taketori arena setup done
+```
+
+先校验必设项（没齐会把「还缺什么」再列一遍，会话保留可继续补），再写回模板世界
+（失败自动回滚）；**写回真正落盘之后**才对齐模板文件夹名、保存 `arenas.yml` 并回报
+「已完成」——所以看到「已完成」就代表磁盘上已是新图，不会出现「报了成功却没写回」。
+
+中途放弃用 `/taketori arena setup cancel`——它会清掉会话，编辑世界仍加载着。
+放弃路径**不会**自动对齐模板名：
+
+- 想直接保存当前编辑成果：`/taketori moonmap unload <模板名>`，它写回 `moonmaps/<模板名>/`；
+- 场地 id 与模板名**不同名**时别走 cancel：重新 `/taketori arena setup <场地id> <模板名>`
+  接着改，最后仍用 `setup done` 收尾，改名才会发生。
+
+用 `/taketori moonmap list` 确认模板显示 **就绪·开放**（`arena list` 同样可见）。
+
+**万一写回失败**：插件会把编辑现场转存到 `plugins/TaketoriKassen/moonmap-recover/<模板名>/`，
+并提示你重新 `arena setup`——重进时会自动从那里恢复，不用重划。
+若提示「编辑副本仍留在 `k_tpl_<模板名>`」（转存也失败），请**不要重载或重启**
+（服务器会把根目录下的编辑副本当残留清掉）：先把它改名去掉 `k_tpl_` 前缀
+（例如 `<模板名>_recover`），再手动整理进 `moonmaps/<模板名>/`。
+
+### 7. 设大厅
 
 站到大厅出生点执行，再用锄头划出大厅范围：
 
@@ -132,12 +195,14 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 /taketori lobby setregion
 ```
 
-### 6. 摆告示牌
+### 8. 摆告示牌
 
 放好牌子，准星对着牌子执行（6 格内）：
 
 ```
 /taketori lobby addsign join        # 快速加入（自动进入等待人数最多的房间）
+/taketori lobby addsign create      # 降临月之都（创建房间）
+/taketori lobby addstatus kaguya    # 实时房间状态牌（每秒刷新，点击加入/旁观/创建）
 /taketori lobby addsign rooms       # 房间列表（选房加入 / 旁观进行中的房间）
 /taketori lobby addsign leave       # 退房回大厅 / 退出观战
 /taketori lobby addsign spectate    # 旁观
@@ -146,9 +211,11 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 /taketori lobby addsign ranks       # 排行榜
 ```
 
-可绑动作：`join` / `leave` / `rooms` / `spectate` / `character` / `character:<角色id>` / `menu` / `ranks` / `lobby`。
+可绑动作：`join` / `leave` / `rooms` / `create` / `spectate` / `character` / `character:<角色id>` / `menu` / `ranks` / `lobby`。
+**实时状态牌**（`addstatus <模板id>`）每秒刷新该模板当前房间的状态与人数，
+点击直接加入 / 旁观（有缺口先补位）/ 无房时创建；牌子被破坏会自动从列表摘除。
 
-### 7. 检查配置
+### 9. 检查配置
 
 ```
 /taketori arena list
@@ -157,20 +224,24 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 
 `arena list` 里每个启用场地要显示 **就绪·开放**（未就绪会列出还缺什么：出生点 / 基地 / 刷新区 / 等待点），`lobby list` 要显示 **是否可用：是**。
 
-### 8. 开一局
+### 10. 开一局
 
-玩家在大厅点「加入对局」告示牌（或菜单匹配按钮）**快速加入**：自动进入等待人数最多的房间，被传送到该场地的中立等待区；也可以打开**房间列表**选具体的房间。等待人数达到 `waiting.min-players`（默认 2）后房间自动开始倒计时（默认 60 秒，满员切 5 秒，有人退出人数不足则取消），归零后分队进出生点玻璃笼、解笼开战；结算后在线者自动回大厅，房间立即可匹配下一轮。
+玩家有三种进场方式：大厅点「加入对局」告示牌（或菜单匹配按钮）**快速加入**；点**「降临月之都」**创建新房间（异步复制模板世界，几秒后自动进入）；打开**房间列表**选房。快速加入的三级回退：等待人数最多的房间 → 缺人正在打的对局补位 → 用默认模板自动建房。
 
-管理员也可以手动控制（可带场地 id 只作用于指定房间）：
+等待人数达到 `waiting.min-players`（默认 2）后房间自动开始倒计时（默认 **90 秒**；人数过半场——3v3 的第 4 人起——压缩到 **30 秒**；满员切 5 秒；有人退出人数不足则取消），归零后分队进出生点玻璃笼、解笼开战；结算后在线者自动回大厅并返还封存状态，房间世界随即删除。
+
+对局中队友掉线：槽位释放可被补位；`room.understaffed-grace-seconds`（默认 60 秒）内无人补位则缺人队判负、本场提前结束。落后方也可用 `/taketori surrender` 发起投降表决（半数以上在线队友同意即结束）。
+
+管理员也可以手动控制（可带房间 id 只作用于指定房间）：
 
 ```
-/taketori match start [场地id]     # 对目标房间开局（双方各至少 1 人）
-/taketori match force [场地id]     # 人数不够也开（只按该房等待区现有的人分队）
-/taketori match stop [场地id]      # 结束指定房间（不影响其他并发房间）
+/taketori match start [房间id]     # 对目标房间开局（双方各至少 1 人）
+/taketori match force [房间id]     # 人数不够也开（只按该房等待区现有的人分队）
+/taketori match stop [房间id]      # 结束指定房间（不影响其他并发房间）
 /taketori match status             # 逐房间查看阶段 / 人数 / 比分 / 剩余时间
 ```
 
-### 9. PVE（可选）
+### 11. PVE（可选）
 
 ```
 /taketori arena setoutpost          # 划 PVE 保卫据点（选区中心，或你站的位置）
@@ -204,6 +275,7 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 | `sneak-right` | 潜行 + 右键 | 对着方块时原版不发事件，只有右键空气可靠 |
 
 按了没反应时：先用 `/taketori keys` 看按键有没有传到服务端，再用 `/taketori f` 手动触发同一个技能。
+近战左键受蓄力门控（`combat.melee-charge-gate`，默认 0.9）：蓄力不足只结算原版轻击，满蓄才触发技能。
 
 ### 4.2 角色与武器
 
@@ -294,6 +366,9 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 /taketori tags                     隐性标签 GUI（管理员）
 /taketori lobby join|leave|spectate 快速加入房间 / 退房回大厅 / 旁观
 /taketori leave                    退出观战、离开等待房间（对局中参赛者不能中途退出）
+/taketori room create [模板id]     创建房间（降临月之都，异步复制模板世界）
+/taketori room delete|list         删除自己的等待房 / 房间列表
+/taketori surrender                发起/确认本队投降（对局中）
 /taketori doctor                   自检：识别链路、名字解析、配置校验、多世界范围
 ```
 
@@ -302,6 +377,9 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 **场地**（多场地：`set*` / `del*` 作用于当前选中的场地，先用 `create` / `select` 选中）
 
 ```
+/taketori arena setup <id> [模板名]              划场地一条龙：建/选场地 + 载入编辑世界 + 列出剩余清单
+/taketori arena setup done                       校验就绪 → 写回模板世界 → 保存 arenas.yml
+/taketori arena setup cancel                     放弃会话（编辑世界保留，可 moonmap unload 手动保存）
 /taketori arena create <id>                      新建场地并自动选中
 /taketori arena select <id>                      切换当前操作的场地
 /taketori arena enable | disable <id>            开放 / 关闭场地（关闭后匹配不再选中）
@@ -321,6 +399,16 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 /taketori arena deloutpost                       清除据点位置
 /taketori arena clearselection                   清空你的选区
 /taketori arena list                             查看全部场地的启用与就绪情况
+```
+
+**月面模板（`moonmaps/`）**
+
+```
+/taketori moonmap list                            列出模板与 arenas.yml 定义状态
+/taketori moonmap create <模板名>                 从零生成一张平坦模板世界并注册为场地
+/taketori moonmap import <世界名> <场地id>        把服务器已有世界导入为模板（不必手动搬文件夹）
+/taketori moonmap load <模板名>                   复制模板为编辑世界 k_tpl_<名> 并加载
+/taketori moonmap unload <模板名>                 保存编辑世界写回 moonmaps 并卸载
 ```
 
 **大厅**
@@ -363,12 +451,13 @@ TaketoriKassen v1.1.0 已启用：17 把武器 / 9 个角色 / 15 种技能类�
 
 ## 六、配置项
 
-改完 `config.yml` 执行 `/taketori reload` 生效（场地坐标在 `arenas.yml`、大厅在 `lobby.yml`，不受 reload 影响）。
+改完 `config.yml` 执行 `/taketori reload` 生效（模板世界文件夹在 `moonmaps/<模板名>/`，与场地定义 `arenas.yml`、大厅 `lobby.yml` 一样不受 reload 影响）。
 
 | 段 | 关键项 | 默认 |
 | --- | --- | --- |
 | `match` | `mode` / `score-to-win` / `time-limit-minutes` / `team-size` / `respawn-delay-seconds` / `keep-inventory` | pvp / 600 / 20 / 3 / 5 / true |
-| `waiting` | `min-players` / `countdown-seconds` / `full-countdown-seconds` / `cage-hold-seconds` / `end-delay-seconds` / `cage-material` / `pve-full-players` / `void-y-offset` / `protect` | 2 / 60 / 5 / 3 / 5 / GLASS / 0（取 team-size）/ -10 / true |
+| `waiting` | `min-players` / `countdown-seconds` / `half-countdown-seconds` / `full-countdown-seconds` / `cage-hold-seconds` / `end-delay-seconds` / `cage-material` / `pve-full-players` / `void-y-offset` / `protect` | 2 / 90 / 30 / 5 / 3 / 5 / GLASS / 0（取 team-size）/ -10 / true |
+| `room` | `max-rooms` / `max-rooms-per-player` / `world-prefix` / `default-template` / `empty-dispose-seconds` / `understaffed-grace-seconds` | 8 / 1 / kassen_ / kaguya / 60 / 60 |
 | `scoring` | `minion-kill` / `player-kill` / `base-capture` | 3 / 10 / 50 |
 | `combat` | `kill-heal` / `minion-kill-heal` / `friendly-fire-protection` / `third-slot-buff` | 6.0 / 0.0 / auto / 2 秒跳跃提升 V |
 | `loadout` | `armor-enabled` / `armor-material` / `armor-protection` | true / IRON / 2（保护 II） |

@@ -12,6 +12,7 @@ import org.bukkit.scoreboard.DisplaySlot;
 import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,16 +28,11 @@ public final class MatchScoreboard {
 
     private static final MiniMessage MINI = MiniMessage.miniMessage();
 
-    private static final String LINE_RED = "红队";
-    private static final String LINE_BLUE = "蓝队";
-    private static final String LINE_TOTAL = "总分";
-    private static final String LINE_SEPARATOR = "─────────";
-    private static final String LINE_MINE = "你的得分";
-    private static final String LINE_KILLS = "本局击杀";
-    private static final String LINE_WAVE = "波次";
-    private static final String LINE_TIME = "剩余(分钟)";
-    /** PVE：据点耐久百分比（0-100）。 */
-    private static final String LINE_OUTPOST = "据点(%)";
+    /**
+     * 侧边栏行只保留固定槽位语义：每行的排序分恒为固定值（见 {@link #update}），
+     * 数据写进行文本。旧实现把"比分 / 百分比 / 波次"本身当排序分，
+     * 数值相对大小一变，行序就上下跳动，玩家读不到固定位置。
+     */
 
     /** 所属房间：比分/阶段/波次/据点全部按房间取。 */
     private final GameRoom room;
@@ -109,42 +105,57 @@ public final class MatchScoreboard {
         var match = room;
         long minutes = (match.remainingMillis() + 59_999L) / 60_000L;
 
-        // 清掉旧条目，避免分数变化后残留旧行
+        // 清掉旧条目，避免残留旧行
         for (String entry : objective.getScoreboard().getEntries()) {
             objective.getScoreboard().resetScores(entry);
         }
 
+        // 按显示顺序自上而下组装行文本；排序分 = 行数 - 位置（固定，不随数据变化）
+        List<String> lines = new ArrayList<>();
         if (match.isPve()) {
-            // PVE：只有一个总分（目标分写在标题里），击杀数按全队合计
             objective.displayName(MINI.deserialize("<gold><bold>竹取合战 PVE</bold> <gray>目标 "
                     + match.rules().scoreToWin()));
-            objective.getScore(LINE_TOTAL).setScore(match.teamScore(TeamId.RED));
-            objective.getScore(LINE_SEPARATOR).setScore(999);
-            // 保卫据点：显示耐久百分比（据点被拆掉就直接判负，所以放在显眼的位置）
+            lines.add("总分: " + match.teamScore(TeamId.RED));
             OutpostManager outpost = room.outpost();
             if (outpost.isActive()) {
-                objective.getScore(LINE_OUTPOST).setScore((int) Math.round(outpost.healthRatio() * 100.0D));
+                lines.add("据点: " + Math.round(outpost.healthRatio() * 100.0D) + "%");
             }
-            objective.getScore(LINE_MINE).setScore(match.playerScore(player.getUniqueId()));
-            objective.getScore(LINE_KILLS).setScore(match.teamTotalKills(TeamId.RED));
-            // 大波次：显示"当前 / 总数"，让玩家知道还剩几波
+            lines.add("你的得分: " + match.playerScore(player.getUniqueId()));
+            lines.add("全队击杀: " + match.teamTotalKills(TeamId.RED));
             PveSettings pve = plugin.pveSettings();
             if (pve.bigWavesEnabled() && pve.bigWaveCount() > 0) {
-                objective.getScore("大波次/" + pve.bigWaveCount()).setScore(room.minions().bigWave());
+                lines.add("大波次: " + room.minions().bigWave() + "/" + pve.bigWaveCount());
             }
-            objective.getScore(LINE_WAVE).setScore(room.minions().wave());
-            objective.getScore(LINE_TIME).setScore((int) Math.min(999, minutes));
-            return;
+            lines.add("波次: " + room.minions().wave());
+            lines.add("剩余: " + minutes + " 分");
+        } else {
+            objective.displayName(MINI.deserialize("<gold><bold>竹取合战 3v3</bold>"));
+            lines.add("红队: " + match.teamScore(TeamId.RED));
+            lines.add("蓝队: " + match.teamScore(TeamId.BLUE));
+            lines.add("你的得分: " + match.playerScore(player.getUniqueId()));
+            lines.add("本局击杀: " + match.totalKillsOf(player.getUniqueId()));
+            lines.add("波次: " + room.minions().wave());
+            lines.add("剩余: " + minutes + " 分");
         }
 
-        objective.displayName(MINI.deserialize("<gold><bold>竹取合战 3v3</bold>"));
-        objective.getScore(LINE_RED).setScore(match.teamScore(TeamId.RED));
-        objective.getScore(LINE_BLUE).setScore(match.teamScore(TeamId.BLUE));
-        objective.getScore(LINE_SEPARATOR).setScore(999);
-        objective.getScore(LINE_MINE).setScore(match.playerScore(player.getUniqueId()));
-        objective.getScore(LINE_KILLS).setScore(match.totalKillsOf(player.getUniqueId()));
-        objective.getScore(LINE_WAVE).setScore(room.minions().wave());
-        objective.getScore(LINE_TIME).setScore((int) Math.min(999, minutes));
+        for (int i = 0; i < lines.size(); i++) {
+            objective.getScore(uniqueEntry(lines, i)).setScore(lines.size() - i);
+        }
+    }
+
+    /**
+     * 记分板条目必须互不相同：若两行文本恰好一致，给后出现的行追加不可见的
+     * 原版颜色码后缀（§x），既不改变视觉显示，又保证条目唯一。
+     */
+    private static String uniqueEntry(List<String> lines, int index) {
+        String line = lines.get(index);
+        for (int i = 0; i < index; i++) {
+            if (lines.get(i).equals(line)) {
+                return line + org.bukkit.ChatColor.RESET.toString()
+                        + org.bukkit.ChatColor.values()[index % 16];
+            }
+        }
+        return line;
     }
 
     /** 基地占点进度等临时提示走 ActionBar，不占用记分板。 */

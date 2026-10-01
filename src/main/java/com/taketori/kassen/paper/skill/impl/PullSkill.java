@@ -62,6 +62,7 @@ public final class PullSkill implements Skill {
             if (target != null) {
                 if (damage > 0.0D) {
                     target.damage(damage, player);
+                    plugin.damageNumbers().hit(player, target, damage);   // 伤害数字（A1）
                 }
                 drawTrail(eye, target.getLocation().add(0.0D, 1.0D, 0.0D), particle);
                 pullTargetToPlayer(player, target, power, ticks);
@@ -107,9 +108,14 @@ public final class PullSkill implements Skill {
             double distance = pull.length();
             if (distance < 1.5D) {
                 cancel(holder[0]);
+                // 到站反馈：目标被拽到面前的一下"收线"感
+                plugin.fx().particle("CRIT", target.getLocation().add(0.0D, 1.0D, 0.0D), 6, 0.25D);
+                plugin.fx().sound("ENTITY_ARROW_HIT_PLAYER", player, 0.5F, 1.5F);
                 return;
             }
-            pull.normalize().multiply(power);
+            // ease-out 收线：临近时拉力递减，最后半格是"贴上来"而不是"撞上来"
+            double ease = 0.35D + 0.65D * Math.min(1.0D, distance / 8.0D);
+            pull.normalize().multiply(power * ease);
             // 微抬离地：站地面的目标会被摩擦吃掉水平速度
             pull.setY(Math.max(0.12D, Math.min(0.35D, distance * 0.05D)));
             target.setVelocity(target.getVelocity().multiply(0.2D).add(pull));
@@ -129,9 +135,14 @@ public final class PullSkill implements Skill {
             double distance = pull.length();
             if (distance < 2.0D) {
                 cancel(holder[0]);
+                // 到站反馈：自己被拽到锚点时脚下扬尘
+                plugin.fx().particle("CLOUD", player.getLocation(), 8, 0.2D);
+                plugin.fx().sound("ENTITY_ARROW_HIT_PLAYER", player, 0.5F, 1.4F);
                 return;
             }
-            pull.normalize().multiply(power);
+            // ease-out 收线：临近锚点拉力递减，"荡到位"而不是"撞到位"
+            double ease = 0.35D + 0.65D * Math.min(1.0D, distance / 10.0D);
+            pull.normalize().multiply(power * ease);
             pull.setY(Math.max(0.15D, Math.min(0.45D, distance * 0.08D)));
             player.setVelocity(player.getVelocity().multiply(0.2D).add(pull));
             player.setFallDistance(0.0F);

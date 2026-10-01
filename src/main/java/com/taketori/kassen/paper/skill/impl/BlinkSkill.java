@@ -79,6 +79,7 @@ public final class BlinkSkill implements Skill {
         player.teleport(destination);
         player.setFallDistance(0.0F);
         plugin.fx().particle(context.str("particle", "END_ROD"), destination, 20, 0.3D);
+        plugin.fx().particle("CLOUD", destination, 8, 0.25D);   // 落点扬尘（B7 到站反馈）
         plugin.fx().sound(context.str("sound", "ENTITY_ENDERMAN_TELEPORT"), destination, 0.8F, 1.2F);
         if (plugin.config().debug()) {
             plugin.getLogger().info(String.format("[combat] blink 瞬移到 %.1f %.1f %.1f",

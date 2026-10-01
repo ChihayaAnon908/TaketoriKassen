@@ -8,7 +8,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,12 +28,20 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class CooldownBars {
 
-    private record Entry(BossBar bar, long untilMillis, double totalSeconds, String skillName) {
+    private record Entry(BossBar bar, long untilMillis, double totalSeconds, String skillName, boolean ready) {
     }
 
     private static final MiniMessage MINI = MiniMessage.miniMessage();
 
+    // 内层同样用 ConcurrentHashMap：外层并发容器内放普通 EnumMap 时，
+    // 复合操作（get/put/遍历）无同步保证，跨线程调用存在竞态。
     private final Map<UUID, Map<SkillSlot, Entry>> bars = new ConcurrentHashMap<>();
+    /** 就绪提示回调（SkillManager 注入：播一声短促 ready 音；null = 不提示）。 */
+    private final java.util.function.Consumer<Player> readyCue;
+
+    public CooldownBars(java.util.function.Consumer<Player> readyCue) {
+        this.readyCue = readyCue;
+    }
 
     /** 技能进入冷却时调用；同一槽位重复调用只会刷新计时。 */
     public void show(Player player, SkillSlot slot, String skillName, double cooldownSeconds) {
@@ -43,15 +50,15 @@ public final class CooldownBars {
         }
         long until = System.currentTimeMillis() + (long) (cooldownSeconds * 1000.0D);
         Map<SkillSlot, Entry> playerBars = bars.computeIfAbsent(
-                player.getUniqueId(), key -> new EnumMap<>(SkillSlot.class));
+                player.getUniqueId(), key -> new ConcurrentHashMap<>());
 
         Entry existing = playerBars.get(slot);
         if (existing == null) {
             BossBar bar = BossBar.bossBar(title(skillName, cooldownSeconds), 1.0F, colorOf(slot), BossBar.Overlay.PROGRESS);
             player.showBossBar(bar);
-            playerBars.put(slot, new Entry(bar, until, cooldownSeconds, skillName));
+            playerBars.put(slot, new Entry(bar, until, cooldownSeconds, skillName, false));
         } else {
-            playerBars.put(slot, new Entry(existing.bar(), until, cooldownSeconds, skillName));
+            playerBars.put(slot, new Entry(existing.bar(), until, cooldownSeconds, skillName, false));
         }
     }
 
@@ -69,6 +76,18 @@ public final class CooldownBars {
                 Entry entry = playerBars.get(slot);
                 double remaining = (entry.untilMillis() - now) / 1000.0D;
                 if (remaining <= 0.05D) {
+                    if (!entry.ready()) {
+                        // 就绪瞬间：提示音 + 进度条闪绿一拍（"就绪！"），下一 tick 再移除
+                        if (readyCue != null) {
+                            readyCue.accept(player);
+                        }
+                        entry.bar().color(BossBar.Color.GREEN);
+                        entry.bar().progress(1.0F);
+                        entry.bar().name(MINI.deserialize("<green>✔ 就绪"));
+                        playerBars.put(slot, new Entry(entry.bar(), entry.untilMillis(),
+                                entry.totalSeconds(), entry.skillName(), true));
+                        continue;
+                    }
                     player.hideBossBar(entry.bar());
                     playerBars.remove(slot);
                     continue;

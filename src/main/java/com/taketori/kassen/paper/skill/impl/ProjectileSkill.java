@@ -8,6 +8,7 @@ import com.taketori.kassen.paper.skill.SkillResult;
 import org.bukkit.Location;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Fireball;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.persistence.PersistentDataType;
@@ -87,7 +88,71 @@ public final class ProjectileSkill implements Skill {
 
         plugin.fx().sound(context.str("sound", "ENTITY_SNOWBALL_THROW"), player, 0.8F, 1.0F);
         plugin.fx().particle(context.str("particle", "CRIT"), spawn, 5, 0.12D);
+
+        // 弹道软吸附（B5）：把飞行方向向锥角内最近目标轻微修正，补偿 ping 与瞄准误差
+        double homingStrength = context.dbl("homing-strength", 0.0D);
+        double homingRange = context.dbl("homing-range", 8.0D);
+        if (homingStrength > 0.0D) {
+            startHoming(projectile, player, Math.min(0.5D, homingStrength), Math.max(2.0D, homingRange));
+        }
         return SkillResult.SUCCESS;
+    }
+
+    /**
+     * 弹道软吸附：每 tick 在发射方向 10° 锥角、range 格内找最近目标，
+     * 把速度方向向其修正 strength 比例（保持速度大小不变）。每 5° 内不修正可保证
+     * "瞄得准就不受干扰"；目标死亡/弹体落地/超 10 秒自动结束。
+     */
+    private void startHoming(Projectile projectile, Player shooter, double strength, double range) {
+        final org.bukkit.scheduler.BukkitTask[] holder = new org.bukkit.scheduler.BukkitTask[1];
+        final int[] ticks = {0};
+        holder[0] = plugin.scheduler().runTimerTask(() -> {
+            if (ticks[0]++ > 200 || !projectile.isValid() || projectile.isDead()) {
+                if (holder[0] != null) {
+                    holder[0].cancel();
+                }
+                return;
+            }
+            Vector direction = projectile.getVelocity();
+            double speed = direction.length();
+            if (speed < 0.1D) {
+                return;   // 已命中瞬间速度归零，不再修正
+            }
+            Location from = projectile.getLocation();
+            LivingEntity best = null;
+            double bestAngle = Math.toRadians(10.0D);
+            for (org.bukkit.entity.Entity nearby : from.getWorld().getNearbyEntities(from, range, range, range)) {
+                if (!(nearby instanceof LivingEntity living) || living.equals(shooter) || living.isDead()) {
+                    continue;
+                }
+                if (living instanceof Player target && target.getGameMode().name().equals("SPECTATOR")) {
+                    continue;
+                }
+                // 等待区/玻璃笼保护期玩家不做吸附目标（与 ProjectileListener 的伤害豁免一致）
+                if (living instanceof Player protectedPlayer) {
+                    var room = plugin.rooms().roomOf(protectedPlayer);
+                    if (room != null && (room.isCaged(protectedPlayer.getUniqueId())
+                            || (plugin.config().waitingProtect() && room.isProtected(protectedPlayer.getUniqueId())))) {
+                        continue;
+                    }
+                }
+                Vector toTarget = living.getEyeLocation().toVector().subtract(from.toVector());
+                if (toTarget.lengthSquared() < 0.01D) {
+                    continue;
+                }
+                double angle = direction.angle(toTarget);
+                if (angle < bestAngle) {
+                    bestAngle = angle;
+                    best = living;
+                }
+            }
+            if (best == null) {
+                return;
+            }
+            Vector toTarget = best.getEyeLocation().toVector().subtract(from.toVector()).normalize();
+            Vector adjusted = direction.normalize().multiply(1.0D - strength).add(toTarget.multiply(strength));
+            projectile.setVelocity(adjusted.normalize().multiply(speed));
+        }, 1L, 1L);
     }
 
     private EntityType resolveType(String name) {

@@ -110,6 +110,8 @@ public final class RocketJumpSkill implements Skill {
             // 技能执行期已带内部伤害标记，不会触发近战改写
             player.damage(selfDamage);
         }
+        // 落地反馈（B7）：起飞后落地瞬间脚下扬尘 + 软垫音
+        BoostSupport.landingBurst(plugin, player);
 
         if (plugin.config().debug()) {
             plugin.getLogger().info(String.format(

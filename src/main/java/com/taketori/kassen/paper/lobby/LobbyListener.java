@@ -42,6 +42,14 @@ public final class LobbyListener implements Listener {
         if (block == null) {
             return;
         }
+        Player player = event.getPlayer();
+        // 实时状态牌：每秒刷新的房间牌，点击直接加入 / 旁观 / 创建
+        var statusSign = plugin.lobby().statusSignAt(block);
+        if (statusSign != null) {
+            event.setCancelled(true);
+            plugin.lobby().clickStatusSign(player, statusSign.templateId());
+            return;
+        }
         LobbySign sign = plugin.lobby().signAt(block);
         if (sign == null) {
             return;   // 不是插件注册的告示牌：完全不放干预
@@ -49,7 +57,7 @@ public final class LobbyListener implements Listener {
         // 是插件自己的告示牌 → 吃掉这次交互
         event.setCancelled(true);
 
-        Player player = event.getPlayer();
+
         LobbyAction action = LobbyAction.of(sign.action());
         if (action == null) {
             player.sendMessage(MINI.deserialize("<red>这张告示牌绑定的动作无法识别：<white>" + sign.action()));
@@ -66,6 +74,7 @@ public final class LobbyListener implements Listener {
         switch (action) {
             // ---- 直接执行的匹配动作：点牌即走，不经过菜单 ----
             case JOIN -> plugin.lobby().quickJoin(player);
+            case CREATE -> plugin.lobby().createRoom(player, null);
             case LEAVE -> leaveViaSign(player);
             // ---- 指向界面：告示牌只负责把入口指到 GUI ----
             case SPECTATE, LOBBY, MENU -> openMenuFor(player, action);

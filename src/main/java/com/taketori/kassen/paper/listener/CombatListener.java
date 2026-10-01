@@ -93,6 +93,14 @@ public final class CombatListener implements Listener {
             return;
         }
 
+        // 蓄力门控（C10）：不满蓄的挥击保留原版轻击伤害，不再"挥了完全没反应"——奖励攻击节奏
+        float attackCharge = player.getAttackCooldown();
+        double chargeGate = plugin.config().meleeChargeGate();
+        if (chargeGate > 0.0D && attackCharge < chargeGate) {
+            debug(String.format("└ 蓄力 %.2f < %.2f → 保留原版轻击", attackCharge, chargeGate));
+            return;
+        }
+
         event.setCancelled(true);
         profile.markSwing(player.getWorld().getGameTime(), weapon.id());
         debug("└ 已取消原版伤害，改由技能 " + skill.type() + " 结算（mode=" + mode + "）");
@@ -306,6 +314,11 @@ public final class CombatListener implements Listener {
             event.setDamage(finalDamage);
             debug(String.format("强化箭命中 → 伤害 ×%.2f", multiplier));
             plugin.fx().particle("CRIT", event.getEntity().getLocation().add(0.0D, 1.0D, 0.0D), 12, 0.25D);
+        }
+        // 伤害数字（A1）：强化箭/普通箭命中都汇报给射手
+        if (arrow.getShooter() instanceof Player owner
+                && event.getEntity() instanceof LivingEntity victim) {
+            plugin.damageNumbers().hit(owner, victim, finalDamage);
         }
 
         // 命中范围伤害：让特殊射击不只是"数字变大"，而是能打到一片

@@ -259,6 +259,12 @@ public final class InputListener implements Listener {
         long now = System.currentTimeMillis();
         Long last = lastSneakStart.put(player.getUniqueId(), now);
         if (last == null) {
+            // 首按提示（C9）：把"双击潜行"的输入窗口可视化，不再怀疑第一下有没有被记录。
+            // 只在手持插件武器时提示，平时蹲墙角不刷屏。
+            if (plugin.items().read(player.getInventory().getItemInMainHand()) != null) {
+                plugin.fx().actionBar(player, net.kyori.adventure.text.minimessage.MiniMessage.miniMessage()
+                        .deserialize("<dark_gray>再按一次潜行 → 第三槽技能"));
+            }
             return;
         }
         long gap = now - last;

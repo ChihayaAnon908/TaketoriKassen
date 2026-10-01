@@ -122,4 +122,58 @@ val checkParamKeys by tasks.registering {
 }
 
 tasks.named("check") { dependsOn(checkParamKeys) }
+
+// ---------------------------------------------------------------------------
+// 离线验证程序（tools/）：不依赖运行中的服务器——参数解析、MiniMessage 按钮、
+// 多世界作用域、weapons.yml 健全性、YAML 编辑器回归。
+// 接入构建后可用 ./gradlew offlineCheck 一键运行，避免它们沦为无人编译的死代码。
+// ---------------------------------------------------------------------------
+val compileOfflineTools by tasks.registering(JavaCompile::class) {
+    group = "verification"
+    description = "编译 tools/ 下的离线验证程序"
+    dependsOn(tasks.compileJava)
+    source = fileTree("tools") { include("**/*.java") }
+    classpath = files(sourceSets.main.get().output, configurations.compileClasspath)
+    destinationDirectory.set(layout.buildDirectory.dir("classes/offline-tools"))
+    options.encoding = "UTF-8"
+    options.release.set(21)
+}
+
+data class OfflineTool(val mainClass: String, val taskName: String, val arguments: List<String>)
+
+val offlineTools = listOf(
+    OfflineTool("BaseArgParserTest", "offlineBaseArgParser", emptyList()),
+    OfflineTool("MiniMessageClickTest", "offlineMiniMessageClick", emptyList()),
+    OfflineTool("WeaponYamlCheck", "offlineWeaponYamlCheck", listOf("src/main/resources")),
+    OfflineTool("WeaponYamlEditorTest", "offlineWeaponYamlEditor", emptyList()),
+    OfflineTool("WorldScopeTest", "offlineWorldScope", emptyList())
+)
+
+val offlineCheck by tasks.registering {
+    group = "verification"
+    description = "运行 tools/ 下全部离线验证程序"
+}
+
+offlineTools.forEach { tool ->
+    val execTask = tasks.register<JavaExec>(tool.taskName) {
+        group = "verification"
+        description = "运行离线验证：${tool.mainClass}"
+        dependsOn(compileOfflineTools, tasks.classes)
+        mainClass.set(tool.mainClass)
+        classpath = files(
+            layout.buildDirectory.dir("classes/offline-tools"),
+            sourceSets.main.get().output,
+            configurations.compileClasspath
+        )
+        workingDir = layout.projectDirectory.asFile
+        if (tool.arguments.isNotEmpty()) {
+            args(tool.arguments)
+        }
+    }
+    offlineCheck { dependsOn(execTask) }
+}
+
+tasks.named("check") { dependsOn(checkParamKeys) }
 tasks.named("build") { dependsOn(checkParamKeys) }
+// 离线验证随 build 自动运行，防止 tools/ 沦为无人编译的死代码
+tasks.named("check") { dependsOn(offlineCheck) }

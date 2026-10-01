@@ -115,17 +115,32 @@ public final class WaitingListener implements Listener {
         }
     }
 
-    /** 桶也是方块改动，保护期同样禁止（防岩浆/水搞乱等待区）。 */
+    /**
+     * 桶也是方块改动，保护期同样禁止；目标点落在玻璃笼 / 屏障墙 / 对局区域内
+     * 也禁止（与破坏 / 放置同一套区域判定），防岩浆/水搞乱等待区与场地。
+     */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onBucketEmpty(PlayerBucketEmptyEvent event) {
-        if (guarded(event.getPlayer())) {
+        Player player = event.getPlayer();
+        if (guarded(player)) {
+            event.setCancelled(true);
+            return;
+        }
+        Location loc = event.getBlock().getLocation();
+        if (isAnyCageBlock(loc) || isAnyBarrierBlock(loc) || isInsideAnyActivePlayArea(loc)) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onBucketFill(PlayerBucketFillEvent event) {
-        if (guarded(event.getPlayer())) {
+        Player player = event.getPlayer();
+        if (guarded(player)) {
+            event.setCancelled(true);
+            return;
+        }
+        Location loc = event.getBlock().getLocation();
+        if (isAnyCageBlock(loc) || isAnyBarrierBlock(loc) || isInsideAnyActivePlayArea(loc)) {
             event.setCancelled(true);
         }
     }
@@ -177,7 +192,7 @@ public final class WaitingListener implements Listener {
             if (!guarded(room, player.getUniqueId())) {
                 return;
             }
-            Location waitSpawn = room.arena().waitSpawn();
+            Location waitSpawn = room.arena().waitAreaCenterOrSpawn();
             if (waitSpawn == null) {
                 return;
             }
@@ -188,7 +203,8 @@ public final class WaitingListener implements Listener {
             }
         } else if (room.isCaged(player.getUniqueId())) {
             TeamId team = room.teamOf(player.getUniqueId());
-            Location spawn = team == null ? null : room.arena().spawn(team);
+            ArenaDef.Point spawnPoint = team == null ? null : room.arena().spawn(team);
+            Location spawn = spawnPoint == null ? null : spawnPoint.toBukkitLocation();
             if (spawn == null) {
                 return;
             }

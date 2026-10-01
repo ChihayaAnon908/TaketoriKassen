@@ -16,7 +16,7 @@ import java.util.List;
 public final class ConfigMigrator {
 
     /** 当前配置结构版本；每次改动默认值或键名都要 +1，并在下面加一段迁移。 */
-    public static final int CURRENT_VERSION = 8;
+    public static final int CURRENT_VERSION = 10;
 
     private final TaketoriPlugin plugin;
 
@@ -138,10 +138,13 @@ public final class ConfigMigrator {
                 config.set("waiting.min-players", 2);
             }
             if (!config.isSet("waiting.countdown-seconds")) {
-                config.set("waiting.countdown-seconds", 60);
+                config.set("waiting.countdown-seconds", 90);
             }
             if (!config.isSet("waiting.full-countdown-seconds")) {
                 config.set("waiting.full-countdown-seconds", 5);
+            }
+            if (!config.isSet("waiting.half-countdown-seconds")) {
+                config.set("waiting.half-countdown-seconds", 30);
             }
             if (!config.isSet("waiting.cage-hold-seconds")) {
                 config.set("waiting.cage-hold-seconds", 3);
@@ -161,8 +164,49 @@ public final class ConfigMigrator {
             if (!config.isSet("waiting.protect")) {
                 config.set("waiting.protect", true);
             }
-            notes.add("waiting: 新增等待区段（min-players=2 / countdown=30s / 满员 5s / "
+            notes.add("waiting: 新增等待区段（min-players=2 / countdown=90s / 满员 5s / "
                     + "出生点玻璃笼 3s / 结算 5s）——匹配改为 BedWars 式：大厅匹配 → 房间等待区 → 倒计时开局");
+        }
+
+        if (version < 9) {
+            // v8 → v9：动态房间制（月之都）。房间改为玩家按需创建——异步复制 moonmaps/ 模板世界，
+            // 结束后整场删除；不再按启用场地自动建房。全部只补缺失键，服主自己写过的值不动。
+            if (!config.isSet("room.max-rooms")) {
+                config.set("room.max-rooms", 8);
+            }
+            if (!config.isSet("room.max-rooms-per-player")) {
+                config.set("room.max-rooms-per-player", 1);
+            }
+            if (!config.isSet("room.world-prefix")) {
+                config.set("room.world-prefix", "kassen_");
+            }
+            if (!config.isSet("room.default-template")) {
+                config.set("room.default-template", "kaguya");
+            }
+            if (!config.isSet("room.empty-dispose-seconds")) {
+                config.set("room.empty-dispose-seconds", 60);
+            }
+            if (!config.isSet("room.understaffed-grace-seconds")) {
+                config.set("room.understaffed-grace-seconds", 60);
+            }
+            if (!config.isSet("combat.melee-charge-gate")) {
+                config.set("combat.melee-charge-gate", 0.9);
+            }
+            notes.add("room: 新增动态房间段（同时上限 8 / 每人 1 房 / 世界前缀 kassen_ / 默认模板 kaguya / 空房 60s 解散）"
+                    + "——房间改为玩家创建：异步复制 moonmaps 模板世界，结算完成后自动删除；"
+                    + "另新增 combat.melee-charge-gate 近战蓄力门控");
+        }
+
+        if (version < 10) {
+            // v9 → v10：匹配重写配套。新增断线重连时限与派对（组队）人数上限，只补缺失键。
+            if (!config.isSet("room.rejoin-seconds")) {
+                config.set("room.rejoin-seconds", 300);
+            }
+            if (!config.isSet("party.max-size")) {
+                config.set("party.max-size", 3);
+            }
+            notes.add("room.rejoin-seconds: 新增 300（对局中掉线 5 分钟内重连回原房原队，0 = 关闭）"
+                    + "；party.max-size: 新增 3（派对组队：整队同房、开局整组同队）");
         }
 
         config.set("config-version", CURRENT_VERSION);

@@ -15,6 +15,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -325,8 +326,11 @@ public final class AdminMenu implements Listener {
         if (def.hasOutpost()) {
             int slot = 36;
             holder.targets().put(slot, new DeleteTarget("outpost", null, 0));
+            var outpostPoint = def.outpost();
             inventory.setItem(slot, button(Material.SNOWBALL, "<white>PVE 据点",
-                    "<gray>位置：" + describe(def.outpost()),
+                    "<gray>位置：" + (outpostPoint == null ? "（未设置）"
+                            : outpostPoint.worldName() + " " + String.format("%.0f,%.0f,%.0f",
+                            outpostPoint.x(), outpostPoint.y(), outpostPoint.z())),
                     "<red>点击删除据点位置",
                     "<dark_gray>删除后 PVE 会回落到第一个月人刷新区中心"));
         } else {
@@ -438,6 +442,14 @@ public final class AdminMenu implements Listener {
     }
 
     // ---------------------------------------------------------------- 点击
+
+    /** 拖拽同样不允许在本菜单分发物品（与点击取消保持一致）。 */
+    @EventHandler
+    public void onDrag(InventoryDragEvent event) {
+        if (event.getInventory().getHolder() instanceof Holder) {
+            event.setCancelled(true);
+        }
+    }
 
     @EventHandler
     public void onClick(InventoryClickEvent event) {

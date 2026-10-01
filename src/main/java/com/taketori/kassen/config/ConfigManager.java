@@ -50,7 +50,9 @@ public final class ConfigManager {
     private String cooldownDisplay = "bossbar";
     private boolean allowDrop;
     private boolean autoGiveOnJoin;
-    private String qMode = "held-slot";
+    // 字段默认值必须与 load() 的回退默认值（"drop"）一致，
+    // 避免在首次 load 前读到该字段的代码看到相互矛盾的初值。
+    private String qMode = "drop";
     private List<Integer> weaponSlots = List.of(0, 1, 2, 3);
 
     public ConfigManager(TaketoriPlugin plugin) {
@@ -356,12 +358,17 @@ public final class ConfigManager {
 
     /** 达到最低人数后的倒计时秒数（至少 1 秒）。 */
     public int waitingCountdownSeconds() {
-        return Math.max(1, plugin.getConfig().getInt("waiting.countdown-seconds", 60));
+        return Math.max(1, plugin.getConfig().getInt("waiting.countdown-seconds", 90));
     }
 
     /** 房间满员后的短倒计时秒数（0 也允许：满员立即开局）。 */
     public int waitingFullCountdownSeconds() {
         return Math.max(0, plugin.getConfig().getInt("waiting.full-countdown-seconds", 5));
+    }
+
+    /** 人数过半场后的半挡倒计时秒数（0 = 关闭过半压缩）。 */
+    public int waitingHalfCountdownSeconds() {
+        return Math.max(0, plugin.getConfig().getInt("waiting.half-countdown-seconds", 30));
     }
 
     /** 开局后出生点玻璃笼保护秒数（0 = 不用笼子，立即开战）。 */
@@ -395,6 +402,56 @@ public final class ConfigManager {
     /** 等待区是否启用完全保护。 */
     public boolean waitingProtect() {
         return plugin.getConfig().getBoolean("waiting.protect", true);
+    }
+
+    // ---- 动态房间（月之都制）----
+
+    /** 同时存在的房间数上限（含创建中的），超过时拒绝创建。 */
+    public int roomMaxRooms() {
+        return Math.max(1, plugin.getConfig().getInt("room.max-rooms", 8));
+    }
+
+    /** 每个玩家同时拥有的房间数上限（防单人/小号占满全部额度）。 */
+    public int roomMaxRoomsPerPlayer() {
+        return Math.max(1, plugin.getConfig().getInt("room.max-rooms-per-player", 1));
+    }
+
+    /**
+     * 近战蓄力门控（0~1）：攻击冷却蓄力低于该值时保留原版轻击、不触发左键技能
+     * （0 = 关闭门控，任何蓄力都触发技能）。
+     */
+    public double meleeChargeGate() {
+        return Math.max(0.0D, Math.min(1.0D, plugin.getConfig().getDouble("combat.melee-charge-gate", 0.9D)));
+    }
+
+    /** 房间世界名前缀（房间世界 = 前缀 + 自增序号）。 */
+    public String roomWorldPrefix() {
+        return plugin.getConfig().getString("room.world-prefix", "kassen_");
+    }
+
+    /** 默认模板名（快速加入无房自动建房时优先使用）。 */
+    public String roomDefaultTemplate() {
+        return plugin.getConfig().getString("room.default-template", "kaguya");
+    }
+
+    /** 等待房全员离线多少秒后自动解散回收世界（下限 10 秒）。 */
+    public int roomEmptyDisposeSeconds() {
+        return Math.max(10, plugin.getConfig().getInt("room.empty-dispose-seconds", 60));
+    }
+
+    /** 对局缺人宽限期（秒）：超时无人补位缺人队判负（0 = 禁用自动判负）。 */
+    public int roomUnderstaffedGraceSeconds() {
+        return Math.max(0, plugin.getConfig().getInt("room.understaffed-grace-seconds", 60));
+    }
+
+    /** 断线重连时限（秒）：对局中掉线者在时限内重连回原房原队（0 = 关闭重连）。 */
+    public int roomRejoinSeconds() {
+        return Math.max(0, plugin.getConfig().getInt("room.rejoin-seconds", 300));
+    }
+
+    /** 派对人数上限（含房主；3v3 模式下 3 人即满队）。 */
+    public int partyMaxSize() {
+        return Math.max(2, plugin.getConfig().getInt("party.max-size", 3));
     }
 
     public boolean soulbound() {

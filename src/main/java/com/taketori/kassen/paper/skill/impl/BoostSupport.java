@@ -169,4 +169,30 @@ final class BoostSupport {
     static String format(Vector vector) {
         return String.format("(%.2f, %.2f, %.2f)", vector.getX(), vector.getY(), vector.getZ());
     }
+
+    /**
+     * 落地反馈（B7）：起飞后每 4 tick 检测一次，落地瞬间在脚下爆一圈尘土 + 软垫音效。
+     * 必须先离开过地面才算"落地"，防止原地站着误触发；任务最长存活 15 秒自灭。
+     */
+    static void landingBurst(TaketoriPlugin plugin, Player player) {
+        final BukkitTask[] holder = new BukkitTask[1];
+        final int[] ticks = {0};
+        final boolean[] airborne = {false};
+        holder[0] = plugin.scheduler().runTimerTask(() -> {
+            if (ticks[0]++ > 300 || !player.isOnline() || player.isDead()) {
+                cancel(holder[0]);
+                return;
+            }
+            if (!player.isOnGround()) {
+                airborne[0] = true;
+                return;
+            }
+            if (!airborne[0]) {
+                return;
+            }
+            cancel(holder[0]);
+            plugin.fx().particle("CLOUD", player.getLocation(), 10, 0.25D);
+            plugin.fx().sound("BLOCK_SNOW_BREAK", player, 0.7F, 1.1F);
+        }, 4L, 4L);
+    }
 }

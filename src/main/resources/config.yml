@@ -1,6 +1,6 @@
 # 竹取合战 · 战斗层配置
 # 修改后执行 /taketori reload 生效（无需重启服务器）
-config-version: 7
+config-version: 10
 
 # 语言文件（messages.yml）中的语言键
 language: zh_CN
@@ -137,9 +137,11 @@ waiting:
   # 等待人数达到多少开始倒计时
   min-players: 2
   # 达到最低人数后的倒计时秒数
-  countdown-seconds: 60
+  countdown-seconds: 90
   # 房间满员后的短倒计时秒数（PVP 满员 = team-size*2；PVE 见 pve-full-players）
   full-countdown-seconds: 5
+  # 人数过半场（超过 team-size，即 3v3 的第 4 人起）时压缩到的半挡倒计时秒数（0 = 关闭）
+  half-countdown-seconds: 30
   # 开局后出生点玻璃笼的保护秒数（0 = 不用笼子，分队传送后立即开战）
   cage-hold-seconds: 3
   # 对局结束后在房间里停留多少秒再统一送回大厅
@@ -153,6 +155,32 @@ waiting:
   # 等待区是否启用完全保护（无伤害/不饥饿/禁破坏放置）
   protect: true
 
+# ============================ 动态房间（月之都制）============================
+# 房间由玩家按需创建：/taketori room create 或菜单「降临月之都」——异步复制
+# moonmaps/<模板>/ 世界文件夹为服务器根目录下的 kassen_<序号>，创建者与加入者
+# 都传送到该世界；结算完成、玩家回到大厅后整场删除世界。arenas.yml 的条目即
+# "模板定义"（区域/点位在模板编辑世界里划定，/taketori moonmap load|unload 管理）。
+room:
+  # 同时存在的房间数上限（含创建中的），超过时拒绝创建
+  max-rooms: 8
+  # 每个玩家同时拥有的房间数上限（防单人/小号占满全部额度冻结匹配）
+  max-rooms-per-player: 1
+  # 房间世界名前缀（房间世界 = 前缀 + 自增序号）
+  world-prefix: kassen_
+  # 默认模板：快速加入在没有房间时自动用它建房（不存在时回落第一个就绪模板）
+  default-template: kaguya
+  # 等待房全员离线多少秒后自动解散并回收世界
+  empty-dispose-seconds: 60
+  # 对局缺人宽限期（秒）：队友掉线后等这么久招补位，超时缺人队判负（0 = 禁用自动判负）
+  understaffed-grace-seconds: 60
+  # 断线重连时限（秒）：对局中掉线者在此时限内重连，自动回到原房原队（0 = 关闭重连）
+  rejoin-seconds: 300
+
+# 派对（组队）：好友组队后整队进入同一房间，开局分队时整组同队
+party:
+  # 派对人数上限（含房主）
+  max-size: 3
+
 scoring:
   minion-kill: 3      # 击杀小怪得分
   player-kill: 10     # 击杀对方玩家得分（队友互杀不计分）
@@ -164,8 +192,11 @@ scoring:
 combat:
   kill-heal: 6.0         # 击杀敌方玩家回血
   minion-kill-heal: 0.0  # 击杀小兵回血（默认关闭；想让抢怪也回血就调大）
-  # 友伤保护：同一队的玩家互相不造成伤害
-  #   auto = PVP 模式开启、PVE 模式关闭（默认）
+  # 近战蓄力门控（0~1）：攻击冷却蓄力低于该值时保留原版轻击、不触发左键技能。
+  # 0.9 = 与满蓄只差一点点就放不出技能（奖励攻击节奏）；0 = 关闭门控
+  melee-charge-gate: 0.9
+  # 友伤保护：同一房间同一队的玩家互相不造成伤害
+  #   auto = PVP 与 PVE 模式均开启（默认）
   #   on   = 两种模式都保护      off = 两种模式都不保护
   friendly-fire-protection: auto
   # 开局与复活后的临时增益（"出生保护"），持续 duration-seconds 秒

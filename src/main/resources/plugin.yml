@@ -1,7 +1,9 @@
 name: TaketoriKassen
 version: '${version}'
 main: com.taketori.kassen.TaketoriPlugin
-api-version: '1.21.4'
+# api-version 只接受"主版本.次版本"（补丁号不是合法写法，旧服务端会拒绝加载）；
+# 插件代码针对 1.21.4，但 API 门控写 1.21 即可在整个 1.21 生命周期被正确识别
+api-version: '1.21'
 description: '超时空辉夜姬竹取合战 MC 复刻：9 名角色 / 17 把武器 / 15 种技能 + 3v3 与 PVE（据点保卫、大波次），支持多世界服务器'
 authors: [ ChihayaAnon908 ]
 website: 'https://github.com/ChihayaAnon908/TaketoriKassen'
@@ -9,7 +11,7 @@ website: 'https://github.com/ChihayaAnon908/TaketoriKassen'
 commands:
   taketori:
     description: 竹取合战主命令
-    usage: '/taketori <menu|admin|ranks|tag|tags|character|skills|mode|f|keys|play|match|team|arena|lobby|pve|stats|leave|editor|give|debug|doctor|qmode|reload>'
+    usage: '/taketori <menu|admin|ranks|tag|tags|character|skills|mode|f|keys|play|match|team|arena|lobby|room|moonmap|pve|stats|leave|surrender|party|rejoin|editor|give|debug|doctor|qmode|reload>'
     permission: taketori.play
 
 permissions:

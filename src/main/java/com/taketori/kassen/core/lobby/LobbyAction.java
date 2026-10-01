@@ -22,13 +22,14 @@ import java.util.Locale;
  */
 public enum LobbyAction {
 
-    JOIN("join", "快速加入对局（自动进入等待人数最多的房间）"),
+    JOIN("join", "快速加入对局（无房时自动创建新房间并加入）"),
     LEAVE("leave", "离开等待房间回大厅 / 退出观战"),
     SPECTATE("spectate", "旁观当前对局（观众模式）"),
     CHARACTER("character", "打开角色选择菜单"),
     CHARACTER_ID("character:", "直接选择指定角色（character:<角色id>）"),
     MENU("menu", "打开玩家菜单"),
     ROOMS("rooms", "打开房间列表（加入等待房间 / 旁观进行中房间）"),
+    CREATE("create", "创建房间（降临月之都：复制模板世界并进入）"),
     RANKS("ranks", "打开总计排行榜"),
     LOBBY("lobby", "传送回大厅");
 

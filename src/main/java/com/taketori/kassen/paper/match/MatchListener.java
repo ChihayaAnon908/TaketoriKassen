@@ -42,13 +42,10 @@ public final class MatchListener implements Listener {
         this.plugin = plugin;
     }
 
-    /** 小怪被玩家击杀 → 按实体所属房间计分（月人归属在刷怪器，天然按房间隔离）。 */
+    /** 月人（普通/精英，任意实体类型）被玩家击杀 → 按实体所属房间计分（归属在刷怪器，天然按房间隔离）。 */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMinionDeath(EntityDeathEvent event) {
         LivingEntity entity = event.getEntity();
-        if (!(entity instanceof org.bukkit.entity.Zombie)) {
-            return;
-        }
         GameRoom room = plugin.rooms().roomOfEntity(entity);
         if (room == null) {
             return;
@@ -132,7 +129,8 @@ public final class MatchListener implements Listener {
         if (team == null) {
             return;
         }
-        Location spawn = room.arena().spawn(team);
+        var spawnPoint = room.arena().spawn(team);
+        Location spawn = spawnPoint == null ? null : spawnPoint.toBukkitLocation();
         if (spawn != null) {
             event.setRespawnLocation(spawn);
         }
@@ -172,8 +170,8 @@ public final class MatchListener implements Listener {
      * 友伤保护：**同一房间同一队**的玩家互相不造成伤害（近战、箭矢、技能弹体都算）。
      *
      * <p>是否生效看 <code>combat.friendly-fire-protection</code>：
-     * 默认 <code>auto</code> = <b>PVP 开启、PVE 关闭</b>；
-     * 想让 PVE 里也不许互相打，把它设成 <code>on</code> 即可。</p>
+     * 默认 <code>auto</code> = <b>PVP 与 PVE 均开启</b>（PVE 承诺玩家间不互相伤害）；
+     * 想允许同队互打，把它设成 <code>off</code> 即可。</p>
      */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onFriendlyFire(EntityDamageByEntityEvent event) {
@@ -216,13 +214,21 @@ public final class MatchListener implements Listener {
 
     /**
      * 玩家退出：经 RoomManager 解除房间映射。等待/倒计时阶段立即释放名额
-     * （下一 tick 房间倒计时自动重算/取消）；CAGED/PLAYING 保留队伍位置只撤记分板。
+     * （下一 tick 房间倒计时自动重算/取消）；CAGED/PLAYING 保留队伍位置只撤记分板，
+     * 并登记断线重连会话（时限内重连回原房原队）。
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         plugin.spectator().forgetQuietly(player.getUniqueId());
+        // 先把进房封存的背包转全局暂存（房间世界随后可能被删除，玩家数据随世界丢失，
+        // 重连后由 restoreOfflineBackup 返还），再解除房间映射
+        plugin.rooms().stashOfflineBackup(player.getUniqueId());
         GameRoom room = plugin.rooms().leave(player.getUniqueId());
+        if (room != null && room.isRunning() && room.teamOf(player.getUniqueId()) != null) {
+            // 对局中（含笼内）掉线：登记重连会话，重连时编回原队
+            plugin.rejoin().register(player.getUniqueId(), room, room.teamOf(player.getUniqueId()));
+        }
         if (room != null && plugin.config().debug() && room.isRunning()) {
             plugin.getLogger().info("[room " + room.id() + "] " + player.getName()
                     + " 退出对局（队伍保留）");

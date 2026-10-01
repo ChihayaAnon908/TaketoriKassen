@@ -49,7 +49,12 @@ public final class SkillManager {
         this.cooldowns = cooldowns;
         this.items = items;
         this.fx = fx;
-        this.cooldownBars = new CooldownBars();
+        // 冷却就绪提示音：BossBar 满的瞬间播一声短促高音（A4），玩家不用盯条听声即知
+        this.cooldownBars = new CooldownBars(player -> {
+            if (plugin.config().cooldownBossBar()) {
+                fx.sound("BLOCK_NOTE_BLOCK_PLING", player, 0.5F, 1.9F);
+            }
+        });
         // 冷却条刷新：每 5 tick 更新进度；任务由 SchedulerAdapter 统一管理，卸载时自动取消
         plugin.scheduler().runTimerTask(cooldownBars::tick, 20L, 5L);
     }
@@ -133,6 +138,12 @@ public final class SkillManager {
         } finally {
             plugin.unmarkInternalDamage(uuid);
             resolving.remove(uuid);
+        }
+
+        // 技能释放自动挥手（A3）：右键/第三槽/Q 的成功施法补一次挥手动画，让"按下去有动作"；
+        // 左键近战在攻击瞬间已由原版挥手，不重复
+        if (result == SkillResult.SUCCESS && slot != SkillSlot.LEFT) {
+            player.swingMainHand();
         }
 
         if (result.consumesCooldown() && checkCooldown) {

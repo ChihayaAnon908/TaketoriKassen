@@ -89,6 +89,8 @@ public final class TaketoriPlugin extends JavaPlugin {
     private VersionAdapter versions;
     private ItemFactory items;
     private Fx fx;
+    /** 伤害数字（动作栏聚合汇报，A1 手感项）。 */
+    private com.taketori.kassen.paper.effect.DamageNumbers damageNumbers;
     private SchedulerAdapter scheduler;
     private CombatStates states;
     private SkillRegistry registry;
@@ -126,6 +128,14 @@ public final class TaketoriPlugin extends JavaPlugin {
     private SetupWandService setupWand;
     /** 管理用具：武器数据编辑 GUI。 */
     private WeaponEditor editor;
+    /** 派对（组队）：整队进同一房间、开局整组同队。 */
+    private com.taketori.kassen.paper.party.PartyManager party;
+    /** 断线重连：对局中掉线者在时限内重连回原房原队。 */
+    private com.taketori.kassen.paper.match.RejoinManager rejoin;
+    /** 划场地一条龙会话（arena setup 单入口）。 */
+    private com.taketori.kassen.paper.setup.ArenaSetupSession arenaSetup;
+    /** 派对图形界面（成员头颅 / 邀请 / 踢人 / 解散）。 */
+    private com.taketori.kassen.paper.party.PartyMenu partyMenu;
 
     /** 插件自身造成的伤害标记：防止与近战改写逻辑互相递归。 */
     private final Set<UUID> internalDamage = ConcurrentHashMap.newKeySet();
@@ -147,6 +157,7 @@ public final class TaketoriPlugin extends JavaPlugin {
         items = new ItemFactory(this, versions);
         loadTags();
         fx = new Fx(config, versions);
+        damageNumbers = new com.taketori.kassen.paper.effect.DamageNumbers(this);
         scheduler = new SchedulerAdapter(this);
         states = new CombatStates();
         cooldowns = new CooldownManager();
@@ -174,6 +185,7 @@ public final class TaketoriPlugin extends JavaPlugin {
         spectator = new SpectatorManager(this);
         lobby = new LobbyManager(this);
         lobby.load();
+        lobby.startStatusTask();   // 实时状态牌：每秒刷新一次文本
         characterMenu = new CharacterMenu(this);
         // ---- 玩家菜单与总计排行榜（原有的告示牌与指令全部保留）----
         playerMenu = new PlayerMenu(this);
@@ -185,6 +197,12 @@ public final class TaketoriPlugin extends JavaPlugin {
         setupWand = new SetupWandService(this, new SetupWand(this));
         setupWand.start();
         getServer().getPluginManager().registerEvents(new SetupWandListener(this), this);
+        // ---- 派对 / 断线重连 / 划场地一条龙 ----
+        party = new com.taketori.kassen.paper.party.PartyManager(this);
+        rejoin = new com.taketori.kassen.paper.match.RejoinManager(this);
+        arenaSetup = new com.taketori.kassen.paper.setup.ArenaSetupSession(this);
+        partyMenu = new com.taketori.kassen.paper.party.PartyMenu(this);
+        getServer().getPluginManager().registerEvents(partyMenu, this);
         // ---- 管理用具：武器数据编辑 GUI（改数值 → 写回 weapons.yml → 自动 reload）----
         editor = new WeaponEditor(this);
         getServer().getPluginManager().registerEvents(new WeaponEditorListener(this), this);
@@ -245,9 +263,23 @@ public final class TaketoriPlugin extends JavaPlugin {
         if (skills != null) {
             skills.cooldownBars().clearAll();   // 移除所有玩家屏幕上的冷却条
         }
-        // 玩法层清理：停所有房间（每房自有刷怪/占点/据点/道具/记分板：取消任务、还原笼子、清实体、隐藏记分板）
+        // 玩法层清理：先把房内玩家送回大厅（房间世界即将卸载），再停所有房间并回收世界
         if (rooms != null) {
+            for (Player player : getServer().getOnlinePlayers()) {
+                boolean inRoom = rooms.roomOf(player.getUniqueId()) != null;
+                boolean isAudience = spectator != null && spectator.isAudience(player);
+                if (!inRoom && !isAudience) {
+                    continue;
+                }
+                if (lobby != null) {
+                    lobby.sendToLobby(player);
+                } else {
+                    // lobby 尚未初始化的极端窗口：至少移出房间世界，保证世界可以卸载
+                    player.teleport(getServer().getWorlds().get(0).getSpawnLocation());
+                }
+            }
             rooms.stopAll();
+            rooms.shutdownWorldIo();
         }
         if (arena != null) {
             arena.save();
@@ -263,6 +295,15 @@ public final class TaketoriPlugin extends JavaPlugin {
         }
         if (stats != null) {
             stats.save();
+        }
+        if (damageNumbers != null) {
+            damageNumbers.clearAll();
+        }
+        if (rejoin != null) {
+            rejoin.clearAll();
+        }
+        if (arenaSetup != null) {
+            arenaSetup.clearAll();
         }
         internalDamage.clear();
     }
@@ -478,8 +519,11 @@ public final class TaketoriPlugin extends JavaPlugin {
             config.characters().unbind(player.getUniqueId());
             dataStore.remove(player.getUniqueId());
             clearCharacterWeapons(player);
+            resetCharacterAttributes(player);
             return;
         }
+        // 换角色先清旧武器：否则从 4 武器角色换到 2 武器角色时，多余槽位残留旧角色武器
+        clearCharacterWeapons(player);
         config.characters().bind(player.getUniqueId(), characterId);
         dataStore.setCharacterId(player.getUniqueId(), characterId);
         giveCharacterWeapons(player, characterId);
@@ -597,6 +641,30 @@ public final class TaketoriPlugin extends JavaPlugin {
         }
     }
 
+    /**
+     * 解绑角色时把被 {@code setBaseValue} 改动过的属性还原为原版默认值
+     * （max_health=20、movement_speed=0.1），避免角色血量/速度永久残留、污染其他玩法。
+     */
+    private void resetCharacterAttributes(Player player) {
+        Attribute health = versions.attribute("max_health");
+        if (health != null) {
+            AttributeInstance instance = player.getAttribute(health);
+            if (instance != null) {
+                instance.setBaseValue(20.0D);
+                if (player.getHealth() > instance.getValue()) {
+                    player.setHealth(instance.getValue());
+                }
+            }
+        }
+        Attribute speed = versions.attribute("movement_speed");
+        if (speed != null) {
+            AttributeInstance instance = player.getAttribute(speed);
+            if (instance != null) {
+                instance.setBaseValue(0.1D);
+            }
+        }
+    }
+
     public void clearCharacterWeapons(Player player) {
         PlayerInventory inventory = player.getInventory();
         for (int slot = 0; slot < inventory.getSize(); slot++) {
@@ -615,6 +683,9 @@ public final class TaketoriPlugin extends JavaPlugin {
         internalDamage.remove(uuid);
         if (skills != null) {
             skills.cooldownBars().clear(uuid);   // 清掉屏幕上残留的冷却条
+        }
+        if (damageNumbers != null) {
+            damageNumbers.clear(uuid);   // 未汇报完的伤害数字聚合
         }
         config.characters().forget(uuid);
         if (editor != null) {
@@ -804,6 +875,25 @@ public final class TaketoriPlugin extends JavaPlugin {
         return editor;
     }
 
+    /** 派对（组队）管理。 */
+    public com.taketori.kassen.paper.party.PartyManager party() {
+        return party;
+    }
+
+    public com.taketori.kassen.paper.party.PartyMenu partyMenu() {
+        return partyMenu;
+    }
+
+    /** 断线重连管理。 */
+    public com.taketori.kassen.paper.match.RejoinManager rejoin() {
+        return rejoin;
+    }
+
+    /** 划场地一条龙会话管理。 */
+    public com.taketori.kassen.paper.setup.ArenaSetupSession arenaSetup() {
+        return arenaSetup;
+    }
+
     public ConfigManager config() {
         return config;
     }
@@ -818,6 +908,11 @@ public final class TaketoriPlugin extends JavaPlugin {
 
     public Fx fx() {
         return fx;
+    }
+
+    /** 伤害数字（动作栏聚合汇报）。 */
+    public com.taketori.kassen.paper.effect.DamageNumbers damageNumbers() {
+        return damageNumbers;
     }
 
     public SchedulerAdapter scheduler() {

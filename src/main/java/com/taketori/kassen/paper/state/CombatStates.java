@@ -205,6 +205,20 @@ public final class CombatStates {
         chains.remove(uuid);
     }
 
+    /**
+     * 主动清扫全部过期条目（含已消失生物留下的 mark / defense 等）。
+     * 惰性清理只在同一 UUID 再次被访问时触发——被标记的月人若直接消失，
+     * 条目永远无人访问而残留，故需要一个周期驱动点。
+     */
+    public void sweepExpired() {
+        long now = System.currentTimeMillis();
+        defenses.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
+        reflections.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
+        marks.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
+        fallImmunities.entrySet().removeIf(entry -> now >= entry.getValue());
+        chains.entrySet().removeIf(entry -> now >= entry.getValue().expiresAt);
+    }
+
     public void clearAll() {
         defenses.clear();
         fallImmunities.clear();

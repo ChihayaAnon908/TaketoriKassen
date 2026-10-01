@@ -42,10 +42,12 @@ public final class RoomListMenu implements Listener {
     private static final MiniMessage MINI = MiniMessage.miniMessage();
 
     private static final int SIZE = 54;
-    /** 房间图标占用 0-44；底部三个固定按钮。 */
+    /** 房间图标占用 0-44；底部与侧边的固定按钮。 */
     private static final int SLOT_QUICK_JOIN = 48;
     private static final int SLOT_REFRESH = 49;
     private static final int SLOT_LOBBY = 50;
+    private static final int SLOT_CREATE = 45;
+    private static final int SLOT_DELETE = 46;
     private static final long REFRESH_PERIOD_TICKS = 40L;
 
     private final TaketoriPlugin plugin;
@@ -105,7 +107,9 @@ public final class RoomListMenu implements Listener {
         inventory.clear();
 
         int slot = 0;
+        boolean anyRoom = false;
         for (GameRoom room : plugin.rooms().rooms()) {
+            anyRoom = true;
             if (slot >= 45) {
                 break;
             }
@@ -113,7 +117,31 @@ public final class RoomListMenu implements Listener {
             session.roomSlots.put(slot, room.id());
             slot++;
         }
+        if (!anyRoom) {
+            // 无房间：只启用创建——中央给提示，加入/旁观无从谈起
+            inventory.setItem(22, item(Material.GRASS_BLOCK,
+                    MINI.deserialize("<gold>月之都空空如也"),
+                    MINI.deserialize("<gray>还没有任何房间。"),
+                    MINI.deserialize("<yellow>点下方「降临月之都」创建第一场合战！")));
+        }
 
+        inventory.setItem(SLOT_CREATE, item(Material.NETHER_STAR,
+                MINI.deserialize("<gold>降临月之都（创建房间）"),
+                MINI.deserialize("<gray>从月之都复制一份新的合战世界"),
+                MINI.deserialize("<gray>创建后你会直接进入等待区"),
+                MINI.deserialize("<dark_gray>也可用 /taketori room create [模板]")));
+        Player viewer = Bukkit.getPlayer(session.viewer);
+        GameRoom mine = viewer == null ? null : plugin.rooms().roomOf(viewer);
+        boolean canDelete = mine != null
+                && mine.phase() == GameRoom.Phase.WAITING
+                && (viewer.getUniqueId().equals(mine.creatorId()) || viewer.hasPermission("taketori.admin"));
+        inventory.setItem(SLOT_DELETE, item(canDelete ? Material.TNT : Material.GRAY_DYE,
+                MINI.deserialize("<red>删除房间"),
+                canDelete
+                        ? MINI.deserialize("<gray>删除你所在的等待中房间 <white>" + mine.display())
+                        : MINI.deserialize("<gray>仅房主或管理员可删除"),
+                MINI.deserialize("<gray>仅等待中的房间可删除"),
+                MINI.deserialize("<dark_gray>删除后世界立即回收，房内玩家回大厅")));
         inventory.setItem(SLOT_QUICK_JOIN, item(Material.LIME_DYE,
                 msg("room.list-quick-join"),
                 msg("room.list-quick-join-lore")));
@@ -223,6 +251,19 @@ public final class RoomListMenu implements Listener {
             return;
         }
         switch (rawSlot) {
+            case SLOT_CREATE -> {
+                player.closeInventory();
+                plugin.lobby().createRoom(player, null);
+            }
+            case SLOT_DELETE -> {
+                GameRoom mine = plugin.rooms().roomOf(player);
+                if (mine == null) {
+                    player.sendMessage(MINI.deserialize("<gray>你当前不在任何房间里。"));
+                    return;
+                }
+                player.closeInventory();
+                plugin.lobby().deleteRoom(player, mine.id());
+            }
             case SLOT_QUICK_JOIN -> {
                 player.closeInventory();
                 plugin.lobby().quickJoin(player);
@@ -266,6 +307,13 @@ public final class RoomListMenu implements Listener {
             return;
         }
         if (phase == GameRoom.Phase.CAGED || phase == GameRoom.Phase.PLAYING) {
+            // 有缺口的对局优先补位（掉线不再 3v2 打到底）；否则以观众身份旁观
+            if (phase == GameRoom.Phase.PLAYING && room.reinforcementTeam() != null
+                    && plugin.rooms().roomOf(player) == null) {
+                player.closeInventory();
+                plugin.lobby().joinRoom(player, roomId);
+                return;
+            }
             GameRoom current = plugin.rooms().roomOf(player);
             if (current != null && !plugin.spectator().isSpectator(player)) {
                 player.sendMessage(MINI.deserialize("<red>你已经在房间 <white>" + current.display()

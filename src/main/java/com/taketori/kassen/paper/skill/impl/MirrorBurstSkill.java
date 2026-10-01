@@ -33,6 +33,8 @@ public final class MirrorBurstSkill implements Skill {
         Player player = context.player();
         double radius = context.dbl("radius", 5.0D);
         double damage = context.dbl("damage", 4.0D);
+        // 重技能施法演出（D13）：title + 低沉施法音，与瞬发右键技能的"轻快"区分
+        plugin.fx().castHeavy(player, "镜光爆发");
         // 键名是 slow-duration（不是 duration-ticks）——必须与 weapons.yml、ConfigValidator 一致，
         // 否则玩家改配置不会生效而且没有任何报错
         int slowDuration = context.integer("slow-duration", 80);
@@ -48,6 +50,7 @@ public final class MirrorBurstSkill implements Skill {
             affected++;
             if (damage > 0.0D) {
                 living.damage(damage, player);
+                plugin.damageNumbers().hit(player, living, damage);   // 伤害数字（A1）
             }
             apply(living, "SLOWNESS", slowDuration, slowAmplifier);
             apply(living, "BLINDNESS", blindnessTicks, 0);

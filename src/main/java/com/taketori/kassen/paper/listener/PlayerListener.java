@@ -33,9 +33,15 @@ public final class PlayerListener implements Listener {
         String characterId = plugin.dataStore().characterIdOf(player.getUniqueId());
         if (characterId != null && plugin.config().characters().has(characterId)) {
             plugin.config().characters().bind(player.getUniqueId(), characterId);
-            if (plugin.config().autoGiveOnJoin()) {
-                plugin.scheduler().runLater(() -> plugin.giveCharacterWeapons(player, characterId), 20L);
-            }
+        }
+        // 断线重连：对局中掉线者在时限内自动回到原房原队（含背包快照还原/传送/记分板）。
+        // 成功则跳过其余加入流程——不送大厅、不自动发武器（背包已由快照还原，重复发放会刷物品）。
+        if (plugin.rejoin().tryRejoin(player)) {
+            return;
+        }
+        if (characterId != null && plugin.config().characters().has(characterId)
+                && plugin.config().autoGiveOnJoin()) {
+            plugin.scheduler().runLater(() -> plugin.giveCharacterWeapons(player, characterId), 20L);
         }
         // 进服送到大厅：只在"接管白名单"内的世界才做。
         // 多世界服务器上默认只接管大厅出生点所在的世界，其它世界（别的玩法世界、资源世界）
@@ -69,6 +75,8 @@ public final class PlayerListener implements Listener {
         Player player = event.getPlayer();
         // 对局中断线：把该房间为其备份的原背包转到全局暂存，等重连再还
         plugin.rooms().stashOfflineBackup(player.getUniqueId());
+        // 派对清理：成员退出移除，房主退出转让给最早成员（无成员才解散）
+        plugin.party().onQuit(player.getUniqueId());
         plugin.forgetPlayer(player);
     }
 }

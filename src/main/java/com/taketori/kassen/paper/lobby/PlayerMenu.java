@@ -10,12 +10,16 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * 玩家入口菜单：把"匹配 / 队伍选择 / 角色选择"做成图形入口。
@@ -61,9 +65,35 @@ public final class PlayerMenu implements Listener {
     }
 
     private final TaketoriPlugin plugin;
+    /**
+     * 被强制选队伍的等待者：选完角色后强制弹出队伍页，关闭页面而仍未选队伍时
+     * 自动重开（choose 成功 / 离开房间时解除）。
+     */
+    private final Set<UUID> teamForced = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public PlayerMenu(TaketoriPlugin plugin) {
         this.plugin = plugin;
+    }
+
+    /** 强制打开队伍页（CharacterMenu 选完角色后调用）。 */
+    public void openTeamForced(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        teamForced.add(player.getUniqueId());
+        openTeam(player);
+    }
+
+    /** 解除某玩家的选队伍强制（离开房间 / 退房）。 */
+    public void cancelTeamForce(UUID uuid) {
+        if (uuid != null) {
+            teamForced.remove(uuid);
+        }
+    }
+
+    /** 清空全部选队伍强制（reload / 停服）。 */
+    public void clearTeamForced() {
+        teamForced.clear();
     }
 
     // ---------------------------------------------------------------- 入口页
@@ -86,20 +116,20 @@ public final class PlayerMenu implements Listener {
         var profile = plugin.config().characters().profile(player.getUniqueId());
         String character = profile.hasCharacter() ? profile.characterId() : "未选择";
 
-        inventory.setItem(10, button(inWaitingRoom ? Material.RED_DYE : Material.COMPASS,
+        inventory.setItem(10, button(inWaitingRoom ? Material.RED_DYE
+                        : (inLiveRoom ? Material.TNT : Material.NETHER_STAR),
                 inWaitingRoom ? "<yellow>离开等待区（回大厅）"
-                        : (inLiveRoom ? "<gray>对局进行中" : "<green>快速加入对局"),
+                        : (inLiveRoom ? "<red>发起/确认投降表决" : "<green>降临月之都（创建/快速加入）"),
                 inWaitingRoom
                         ? "<gray>房间 <white>" + joinedRoom.display()
                                 + " <gray>等待中 <white>(" + joinedRoom.waitingCount()
                                 + "/" + joinedRoom.maxPlayers() + ")"
                         : (inLiveRoom
-                                ? "<gray>你已在房间 <white>" + joinedRoom.display()
-                                        + " <gray>中，参赛者不能中途退出"
-                                : "<gray>自动加入等待人数最多的房间"),
+                                ? "<gray>对本局不满？点击发起本队投降表决"
+                                : "<gray>没有房间时自动用默认模板创建新世界并进入"),
                 inWaitingRoom ? "<dark_gray>再点一次即退出房间、返回大厅"
-                        : (inLiveRoom ? "<dark_gray>要结束整局请联系管理员"
-                                : "<dark_gray>人数达标自动倒计时开局"),
+                        : (inLiveRoom ? "<dark_gray>30 秒内半数以上在线队友同意即结束"
+                                : "<dark_gray>有等待房则直接加入人最多的那个"),
                 "<dark_gray>与点「加入对局」告示牌等价"));
 
         inventory.setItem(12, button(Material.SHIELD, "<white>队伍选择",
@@ -123,10 +153,17 @@ public final class PlayerMenu implements Listener {
                 "<gray>传送回大厅出生点",
                 "<dark_gray>与点「回大厅」告示牌等价"));
 
-        inventory.setItem(14, button(Material.NETHER_STAR, "<white>角色选择",
-                "<gray>当前角色：<white>" + character,
-                "<yellow>点击打开角色菜单",
-                "<dark_gray>选完立即绑定并发放武器"));
+        // 角色选择：游戏外（大厅）禁止，只允许在等待区内打开（进房时本来就会强制弹出）
+        if (inWaitingRoom) {
+            inventory.setItem(14, button(Material.NETHER_STAR, "<white>角色选择",
+                    "<gray>当前角色：<white>" + character,
+                    "<yellow>点击打开角色菜单",
+                    "<dark_gray>选完立即绑定并发放武器"));
+        } else {
+            inventory.setItem(14, button(Material.GRAY_DYE, "<dark_gray>角色选择",
+                    "<red>游戏外不可选择角色",
+                    "<gray>进入等待区时会强制弹出角色菜单，必须选完才能继续等待开局"));
+        }
 
         inventory.setItem(15, button(Material.FILLED_MAP, "<white>房间列表",
                 "<gray>查看所有房间：模式 / 阶段 / 人数 / 倒计时",
@@ -137,6 +174,23 @@ public final class PlayerMenu implements Listener {
         inventory.setItem(16, button(Material.GOLD_INGOT, "<white>总计排行榜",
                 "<gray>总积分 / 击杀 / 拆家 / 对局数…",
                 "<yellow>点击查看（跨局累计）"));
+
+        // 派对入口：无派对显示邀请组队；有派对显示房主与人数
+        var party = plugin.party().partyOf(player.getUniqueId());
+        if (party == null) {
+            inventory.setItem(24, button(Material.PLAYER_HEAD, "<white>派对组队",
+                    "<gray>邀请好友整队进同一房间，开局整组同队",
+                    "<yellow>点击打开派对管理"));
+        } else {
+            Player leaderPlayer = Bukkit.getPlayer(party.leader());
+            String leaderName = leaderPlayer != null
+                    ? leaderPlayer.getName() : party.leader().toString().substring(0, 8);
+            inventory.setItem(24, button(Material.PLAYER_HEAD,
+                    "<gold>派对 <dark_gray>(" + party.members().size() + "/"
+                            + plugin.party().maxSize() + " 人)",
+                    "<gray>房主：<white>" + leaderName,
+                    "<yellow>点击查看成员 / 邀请 / 退出"));
+        }
 
         inventory.setItem(22, button(Material.BARRIER, "<red>关闭", "<gray>点一下关闭菜单"));
 
@@ -167,28 +221,30 @@ public final class PlayerMenu implements Listener {
         boolean pve = joinedRoom != null && joinedRoom.isPve();
         int maxPerTeam = Math.max(1, plugin.config().matchTeamSize());
 
-        inventory.setItem(11, teamButton(joinedRoom, TeamId.RED, Material.RED_WOOL, current, pve, maxPerTeam));
-        inventory.setItem(15, teamButton(joinedRoom, TeamId.BLUE, Material.BLUE_WOOL, current, pve, maxPerTeam));
+        inventory.setItem(11, teamButton(player, joinedRoom, TeamId.RED, Material.RED_WOOL, current, pve, maxPerTeam));
+        inventory.setItem(15, teamButton(player, joinedRoom, TeamId.BLUE, Material.BLUE_WOOL, current, pve, maxPerTeam));
 
         var waitingRoom = plugin.rooms().roomOf(player);
         String roomState = waitingRoom == null ? "未加入"
-                : waitingRoom.display() + " 等待中（开局时自动分队）";
+                : waitingRoom.display() + " 等待中（你选择的队伍即开局队伍）";
         inventory.setItem(13, button(Material.PAPER, "<white>当前状态",
                 "<gray>房间：<white>" + roomState,
                 "<gray>模式：<white>" + (pve ? "PVE（所有人同队）" : "PVP（红队 vs 蓝队）"),
-                "<dark_gray>队伍在开局瞬间按等待名单均衡分配",
+                "<dark_gray>开局不再自动分队：只能加入人数不超过对方的队伍",
                 "<dark_gray>每队上限 " + maxPerTeam + " 人"));
 
         inventory.setItem(22, button(Material.ARROW, "<yellow>返回", "<gray>回到玩家菜单"));
         player.openInventory(inventory);
     }
 
-    private ItemStack teamButton(com.taketori.kassen.paper.match.room.GameRoom room, TeamId team,
-                               Material material, TeamId current, boolean pve, int maxPerTeam) {
+    private ItemStack teamButton(Player viewer, com.taketori.kassen.paper.match.room.GameRoom room, TeamId team,
+                                 Material material, TeamId current, boolean pve, int maxPerTeam) {
         int size = room == null ? 0 : room.teamPlayers(team).size();
         boolean mine = current == team;
-        boolean full = size >= maxPerTeam && !mine;
-        ItemStack item = new ItemStack(pve || full ? Material.GRAY_DYE : material);
+        // 平衡/满员判定（与 GameRoom.chooseTeam 同一规则）：不可选的队伍灰色显示
+        boolean available = room != null && room.canChooseTeam(viewer, team);
+        boolean blocked = !pve && !mine && !available;
+        ItemStack item = new ItemStack(pve || blocked ? Material.GRAY_DYE : material);
         List<Component> lore = new ArrayList<>();
         lore.add(MINI.deserialize("<gray>当前人数：<white>" + size + " / " + maxPerTeam));
         if (pve) {
@@ -196,8 +252,14 @@ public final class PlayerMenu implements Listener {
             lore.add(MINI.deserialize("<yellow>点击仍然可以加入（会并到同一队）"));
         } else if (mine) {
             lore.add(MINI.deserialize("<green>你已在这个队伍"));
-        } else if (full) {
-            lore.add(MINI.deserialize("<red>该队已满"));
+        } else if (blocked) {
+            TeamId other = team == TeamId.RED ? TeamId.BLUE : TeamId.RED;
+            if (size >= maxPerTeam) {
+                lore.add(MINI.deserialize("<red>该队已满"));
+            } else {
+                lore.add(MINI.deserialize("<red>该队人数多于" + other.display() + "，为保持平衡不可选"));
+                lore.add(MINI.deserialize("<gray>请选择" + other.display()));
+            }
         } else {
             lore.add(MINI.deserialize("<yellow>点击加入 " + team.display()));
         }
@@ -210,6 +272,14 @@ public final class PlayerMenu implements Listener {
     }
 
     // ---------------------------------------------------------------- 点击
+
+    /** 拖拽同样不允许在本菜单分发物品（与点击取消保持一致）。 */
+    @EventHandler
+    public void onDrag(InventoryDragEvent event) {
+        if (event.getInventory().getHolder() instanceof Holder) {
+            event.setCancelled(true);
+        }
+    }
 
     @EventHandler
     public void onClick(InventoryClickEvent event) {
@@ -231,8 +301,14 @@ public final class PlayerMenu implements Listener {
                     plugin.lobby().sendToLobby(player);
                 }
                 case 14 -> {
-                    player.closeInventory();
-                    plugin.characterMenu().open(player);
+                    // 只有等待区内才允许打开；大厅点击（灰色按钮）无反应
+                    var roomHere = plugin.rooms().roomOf(player);
+                    if (roomHere != null
+                            && (roomHere.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.WAITING
+                            || roomHere.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.STARTING)) {
+                        player.closeInventory();
+                        plugin.characterMenu().open(player);
+                    }
                 }
                 case 15 -> {
                     player.closeInventory();
@@ -246,6 +322,10 @@ public final class PlayerMenu implements Listener {
                     if (player.hasPermission("taketori.admin")) {
                         plugin.adminMenu().open(player);
                     }
+                }
+                case 24 -> {
+                    player.closeInventory();
+                    plugin.partyMenu().open(player);
                 }
                 case 22 -> player.closeInventory();
                 default -> {
@@ -262,7 +342,7 @@ public final class PlayerMenu implements Listener {
         }
     }
 
-    /** 匹配按钮：无房→快速加入；等待房→退房回大厅；对局中→拒绝（文案走 LobbyManager 统一入口）。 */
+    /** 匹配按钮：无房→快速加入（无房自动建房）；等待房→退房回大厅；对局中→发起/确认投降表决。 */
     private void toggleQueue(Player player) {
         var room = plugin.rooms().roomOf(player);
         if (room != null && (room.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.WAITING
@@ -272,8 +352,12 @@ public final class PlayerMenu implements Listener {
             return;
         }
         if (room != null) {
-            player.sendMessage(MINI.deserialize("<red>对局进行中，参赛者不能单独退出。"
-                    + "<gray>要结束整局请找管理员执行 <white>/taketori match stop"));
+            // 对局中：匹配按钮变成投降入口（发起/确认本队表决）
+            if (room.isRunning() && room.teamOf(player.getUniqueId()) != null) {
+                room.surrender(player);
+            } else {
+                player.sendMessage(MINI.deserialize("<gray>本局正在准备或结算中，暂不能投降。"));
+            }
             return;
         }
         player.closeInventory();
@@ -311,7 +395,51 @@ public final class PlayerMenu implements Listener {
             player.sendMessage(MINI.deserialize("<red>" + error));
             return;
         }
+        // 已选队伍：解除强制，再刷新页面（先解除再打开，避免重开触发关闭判定）
+        teamForced.remove(player.getUniqueId());
         openTeam(player);
+    }
+
+    /**
+     * 强制者关掉队伍页：仍在等待区且未选队伍 → 下一 tick 重开；已选/已离开则解除。
+     */
+    @EventHandler
+    public void onTeamClose(InventoryCloseEvent event) {
+        if (!(event.getInventory().getHolder() instanceof Holder holder) || holder.page != Page.TEAM) {
+            return;
+        }
+        if (!(event.getPlayer() instanceof Player player)) {
+            return;
+        }
+        UUID uuid = player.getUniqueId();
+        if (!teamForced.contains(uuid)) {
+            return;
+        }
+        var room = plugin.rooms().roomOf(player);
+        boolean waiting = room != null
+                && (room.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.WAITING
+                || room.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.STARTING);
+        if (!waiting || room.teamOf(uuid) != null) {
+            teamForced.remove(uuid);
+            return;
+        }
+        plugin.scheduler().runLater(() -> {
+            if (!teamForced.contains(uuid) || !player.isOnline()) {
+                return;
+            }
+            var latest = plugin.rooms().roomOf(player);
+            if (latest == null || latest.teamOf(uuid) != null) {
+                teamForced.remove(uuid);
+                return;
+            }
+            if (latest.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.WAITING
+                    || latest.phase() == com.taketori.kassen.paper.match.room.GameRoom.Phase.STARTING) {
+                player.sendMessage(MINI.deserialize("<gold>必须选择队伍后才能继续等待开局<gray>（关闭菜单会再次弹出）"));
+                openTeam(player);
+            } else {
+                teamForced.remove(uuid);
+            }
+        }, 2L);
     }
 
     private ItemStack button(Material material, String name, String... lore) {

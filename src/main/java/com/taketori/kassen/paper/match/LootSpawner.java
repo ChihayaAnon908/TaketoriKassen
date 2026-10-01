@@ -178,8 +178,15 @@ public final class LootSpawner {
         }
         Item dropped = world.dropItemNaturally(location, entry.stack().clone());
         dropped.setPickupDelay(10);
+        // 原版掉落物寿命固定 6000 tick（300 秒）：超过 300 秒的配置无法实现，
+        // 旧写法算出负数再钳为 1，道具几乎立刻消失。这里显式钳制并警告。
         if (despawnSeconds > 0) {
-            dropped.setTicksLived(Math.max(1, 6000 - despawnSeconds * 20));
+            if (despawnSeconds > 300) {
+                plugin.getLogger().warning("[loot] despawn-seconds=" + despawnSeconds
+                        + " 超过原版掉落物寿命上限 300 秒，已按 300 秒处理");
+            }
+            int seconds = Math.min(despawnSeconds, 300);
+            dropped.setTicksLived(Math.max(1, 6000 - seconds * 20));
         }
         drops.add(dropped.getUniqueId());
         plugin.fx().particle("FLAME", location.clone().add(0.0D, 0.5D, 0.0D), 8, 0.3D);

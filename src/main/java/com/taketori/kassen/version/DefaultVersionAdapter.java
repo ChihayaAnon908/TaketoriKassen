@@ -10,9 +10,9 @@ import org.bukkit.potion.PotionEffectType;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 默认适配实现：用"注册表 + 规范化名字匹配"来解析跨版本名字。
@@ -39,7 +39,8 @@ public final class DefaultVersionAdapter implements VersionAdapter {
     private static final String[] SOUND_FIELDS = {"SOUNDS", "SOUND"};
     private static final String[] POTION_FIELDS = {"POTION_EFFECT_TYPE", "POTION_EFFECT"};
 
-    private final Map<String, Object> cache = new HashMap<>();
+    // 并发容器：resolve 可能被异步路径调用，普通 HashMap 的 check-then-put 存在竞态
+    private final Map<String, Object> cache = new ConcurrentHashMap<>();
 
     @Override
     public String name() {

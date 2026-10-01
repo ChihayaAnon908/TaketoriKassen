@@ -4,8 +4,12 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -38,6 +42,12 @@ public final class WeaponYamlEditor {
     private static final Pattern NUMBER = Pattern.compile("-?\\d+(\\.\\d+)?");
     private static final Pattern BOOLEAN = Pattern.compile("(?i)true|false");
 
+    /**
+     * 同一文件的编辑串行锁（read-modify-write 必须整体互斥，否则并发编辑互相覆盖）。
+     * 以规范化路径为键，跨编辑器实例也生效。
+     */
+    private static final Map<String, Object> FILE_LOCKS = new ConcurrentHashMap<>();
+
     private final File file;
 
     public WeaponYamlEditor(File file) {
@@ -69,6 +79,18 @@ public final class WeaponYamlEditor {
         if (path == null || path.isEmpty()) {
             return Result.fail("路径为空");
         }
+        String lockKey;
+        try {
+            lockKey = file.getCanonicalPath();
+        } catch (IOException ex) {
+            lockKey = file.getAbsolutePath();
+        }
+        synchronized (FILE_LOCKS.computeIfAbsent(lockKey, key -> new Object())) {
+            return doSet(path, value, comment);
+        }
+    }
+
+    private Result doSet(List<String> path, String value, String comment) {
         List<String> lines = readLines();
         if (lines == null) {
             return Result.fail("读不到 weapons.yml（文件不存在或没有权限）");
@@ -211,7 +233,11 @@ public final class WeaponYamlEditor {
         return -1;
     }
 
-    /** 值渲染：数字/布尔/列表/已带引号的原样输出，其余加单引号。 */
+    /**
+     * 值渲染：数字/布尔/合法列表/已带引号的原样输出，其余加单引号。
+     * 以 "[" 开头但不是合法行内列表（括号不闭合 / 引号不配对）的内容不原样输出，
+     * 否则会写出非法 YAML（如 {@code [a, b}），让 weapons.yml 整个加载失败。
+     */
     private static String render(String value) {
         if (value == null || value.trim().isEmpty()) {
             return "''";
@@ -220,10 +246,41 @@ public final class WeaponYamlEditor {
         if (NUMBER.matcher(trimmed).matches() || BOOLEAN.matcher(trimmed).matches()) {
             return trimmed;
         }
-        if (trimmed.startsWith("[") || trimmed.startsWith("'") || trimmed.startsWith("\"")) {
+        if (trimmed.startsWith("[")) {
+            return isValidFlowList(trimmed) ? trimmed : "'" + trimmed.replace("'", "''") + "'";
+        }
+        if (trimmed.startsWith("'") || trimmed.startsWith("\"")) {
             return trimmed;
         }
         return "'" + trimmed.replace("'", "''") + "'";
+    }
+
+    /** 行内流列表的轻量语法检查：方括号配对、引号配对，且以 "]" 结尾。 */
+    private static boolean isValidFlowList(String text) {
+        if (!text.endsWith("]")) {
+            return false;
+        }
+        int brackets = 0;
+        boolean inSingle = false;
+        boolean inDouble = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\'' && !inDouble) {
+                inSingle = !inSingle;
+            } else if (c == '"' && !inSingle) {
+                inDouble = !inDouble;
+            } else if (!inSingle && !inDouble) {
+                if (c == '[') {
+                    brackets++;
+                } else if (c == ']') {
+                    brackets--;
+                    if (brackets < 0) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return brackets == 0 && !inSingle && !inDouble;
     }
 
     // ---------------------------------------------------------------- 文件
@@ -239,11 +296,31 @@ public final class WeaponYamlEditor {
         }
     }
 
+    /**
+     * 原子写入：先写同目录临时文件，再原子移动覆盖目标文件。
+     * 直接 Files.write 覆盖时若进程中途崩溃 / 并发写入，会留下半截文件。
+     */
     private boolean writeLines(List<String> lines) {
+        Path targetPath = file.toPath();
+        Path temp = null;
         try {
-            Files.write(file.toPath(), lines, StandardCharsets.UTF_8);
+            temp = Files.createTempFile(targetPath.getParent(),
+                    "." + file.getName() + ".", ".tmp");
+            Files.write(temp, lines, StandardCharsets.UTF_8);
+            try {
+                Files.move(temp, targetPath, StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException atomicUnsupported) {
+                Files.move(temp, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            }
             return true;
         } catch (IOException ex) {
+            if (temp != null) {
+                try {
+                    Files.deleteIfExists(temp);
+                } catch (IOException ignored) {
+                    // 临时文件清理失败不影响返回
+                }
+            }
             return false;
         }
     }

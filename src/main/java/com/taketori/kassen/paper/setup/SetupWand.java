@@ -87,12 +87,24 @@ public final class SetupWand {
 
     // ---------------------------------------------------------------- 道具点工具
 
+    /** 道具点工具键的缓存：NamespacedKey 不可变，没必要每次判定都新建。 */
+    private volatile org.bukkit.NamespacedKey cachedLootKey;
+
     /**
      * 道具刷新点工具的 PDC 键。
      * 用独立的键区分两种工具，避免"拿着道具点工具却在划基地"这类误操作。
      */
     private org.bukkit.NamespacedKey lootKey() {
-        return new org.bukkit.NamespacedKey(plugin, "loot_wand");
+        org.bukkit.NamespacedKey key = cachedLootKey;
+        if (key != null) {
+            return key;
+        }
+        synchronized (this) {
+            if (cachedLootKey == null) {
+                cachedLootKey = new org.bukkit.NamespacedKey(plugin, "loot_wand");
+            }
+            return cachedLootKey;
+        }
     }
 
     /** 道具点工具的材料（配置 setup-wand.loot-material，默认结构空位 —— 冷门且不会被误用）。 */

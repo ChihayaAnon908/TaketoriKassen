@@ -88,7 +88,8 @@ public final class OutpostManager {
         if (pveSettings == null || !pveSettings.outpostEnabled()) {
             return "配置里关掉了 pve.outpost.enabled";
         }
-        Location spot = room.arena().outpost();
+        ArenaDef.Point spotPoint = room.arena().outpost();
+        Location spot = spotPoint == null ? null : spotPoint.toBukkitLocation();
         if (spot == null || spot.getWorld() == null) {
             return "没有可用位置：先用 /taketori arena setoutpost 划定据点，或设置月人刷新区";
         }
@@ -191,7 +192,7 @@ public final class OutpostManager {
         Collection<Entity> nearby = world.getNearbyEntities(center, radius, radius, radius);
         int count = 0;
         for (Entity entity : nearby) {
-            if (entity instanceof LivingEntity && room.minions().isMinion(entity)) {
+            if (entity instanceof LivingEntity && room.minions().isTracked(entity)) {
                 count++;
             }
         }

@@ -2,9 +2,13 @@ package com.taketori.kassen.paper.match;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.configuration.ConfigurationSection;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -94,7 +98,7 @@ public final class CuboidRegion {
                 && z >= minZ - 0.5D && z <= maxZ + 0.5D;
     }
 
-    /** 区域内随机一点（用于生成小怪）。 */
+    /** 区域内随机一点（用于生成小怪；Y 固定区域底部 +1，落点为方块中心）。 */
     public Location randomLocation() {
         World world = world();
         if (world == null) {
@@ -102,9 +106,35 @@ public final class CuboidRegion {
         }
         ThreadLocalRandom random = ThreadLocalRandom.current();
         return new Location(world,
-                random.nextDouble(minX, maxX + 0.999D) + 0.5D,
+                Math.floor(random.nextDouble(minX, maxX + 1.0D)) + 0.5D,
                 minY + 1.0D,
-                random.nextDouble(minZ, maxZ + 0.999D) + 0.5D);
+                Math.floor(random.nextDouble(minZ, maxZ + 1.0D)) + 0.5D);
+    }
+
+    /**
+     * 等待区安全落点：区域内随机整块，取该列最高可站方块的上一格。
+     *
+     * <p>与 {@link #randomLocation()} 的区别：Y 不再固定区域底部 +1（选区是平片时才碰巧正确，
+     * 斜坡/高差/悬空选区会把人埋进方块或丢在半空），而是逐列取最高方块；液面/纯空列重试，
+     * 多次失败回落区域中心。X/Z 为方块中心（+0.5），绝不越过区域边界。</p>
+     */
+    public Location randomStandLocation() {
+        World world = world();
+        if (world == null) {
+            return null;
+        }
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Block last = null;
+        for (int attempt = 0; attempt < 8; attempt++) {
+            int x = (int) Math.floor(random.nextDouble(minX, maxX + 1.0D));
+            int z = (int) Math.floor(random.nextDouble(minZ, maxZ + 1.0D));
+            Block ground = world.getHighestBlockAt(x, z);
+            last = ground;
+            if (!ground.getType().isAir() && !ground.isLiquid()) {
+                return new Location(world, x + 0.5D, ground.getY() + 1.0D, z + 0.5D);
+            }
+        }
+        return last == null ? null : new Location(world, last.getX() + 0.5D, last.getY() + 1.0D, last.getZ() + 0.5D);
     }
 
     /** 区域中心（用于复活点、提示）。 */
@@ -118,6 +148,17 @@ public final class CuboidRegion {
 
     public double volume() {
         return (maxX - minX + 1.0D) * (maxY - minY + 1.0D) * (maxZ - minZ + 1.0D);
+    }
+
+    /** 同一区域重定向到另一个世界（动态房间克隆模板定义用）。 */
+    public CuboidRegion inWorld(String newWorldName) {
+        return new CuboidRegion(newWorldName, minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    /** 区域中心点（世界名 + 坐标；PVE 据点回落位置用，不要求世界已加载）。 */
+    public com.taketori.kassen.paper.match.ArenaDef.Point centerPoint() {
+        return new com.taketori.kassen.paper.match.ArenaDef.Point(worldName,
+                (minX + maxX) / 2.0D + 0.5D, minY + 1.0D, (minZ + maxZ) / 2.0D + 0.5D, 0.0F, 0.0F);
     }
 
     public String describe() {
@@ -135,8 +176,27 @@ public final class CuboidRegion {
         section.set("max.z", maxZ);
     }
 
+    /**
+     * 六个坐标键名；缺任何一个都不能读——旧实现缺键时 getDouble 静默返回 0，
+     * 区域退化为以 (0,0,0) 为角点，并入 playBounds 后屏障墙会建到错误位置。
+     */
+    private static final List<String> REQUIRED_KEYS = List.of(
+            "min.x", "min.y", "min.z", "max.x", "max.y", "max.z");
+
     public static CuboidRegion read(ConfigurationSection section) {
         if (section == null || !section.isString("world")) {
+            return null;
+        }
+        List<String> missing = new ArrayList<>();
+        for (String key : REQUIRED_KEYS) {
+            if (!section.isSet(key)) {
+                missing.add(key);
+            }
+        }
+        if (!missing.isEmpty()) {
+            org.bukkit.Bukkit.getLogger().warning("[CuboidRegion] 区域配置不完整，缺少坐标键 "
+                    + missing + "（world=" + section.getString("world")
+                    + "），已跳过该区域；请修正配置，避免退化到 (0,0,0)。");
             return null;
         }
         return new CuboidRegion(

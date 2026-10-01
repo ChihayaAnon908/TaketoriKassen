@@ -3,10 +3,14 @@ package com.taketori.kassen.paper.effect;
 import com.taketori.kassen.config.ConfigManager;
 import com.taketori.kassen.version.VersionAdapter;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.title.Title;
 import org.bukkit.Location;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
+
+import java.time.Duration;
 
 /**
  * 表现层：粒子与音效。
@@ -71,5 +75,22 @@ public final class Fx {
             return;
         }
         player.sendActionBar(component);
+    }
+
+    /**
+     * 重技能施法演出：低沉的施法音 + 施法者屏幕 title 一闪。
+     *
+     * <p>与瞬发右键技能的"轻快短促"刻意区分——大范围技能（冲击波/镜光爆发这类）
+     * 用更重的音色和 title 霸屏来传达"这一下有分量"。</p>
+     */
+    public void castHeavy(Player caster, String skillName) {
+        if (caster == null || skillName == null || skillName.isBlank()) {
+            return;
+        }
+        caster.showTitle(Title.title(
+                MiniMessage.miniMessage().deserialize("<gold><bold>" + skillName + "</bold></gold>"),
+                Component.empty(),
+                Title.Times.times(Duration.ofMillis(100), Duration.ofMillis(500), Duration.ofMillis(200))));
+        sound("ENTITY_EVOKER_CAST_SPELL", caster, 1.1F, 0.65F);
     }
 }

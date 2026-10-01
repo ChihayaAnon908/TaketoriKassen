@@ -15,9 +15,11 @@ import com.taketori.kassen.core.character.TagManager;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.inventory.ItemStack;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 /**
  * /taketori 命令组。
@@ -35,8 +37,8 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> SUB_COMMANDS = List.of(
             "reload", "give", "character", "debug", "doctor", "mode", "qmode", "skills",
-            "match", "team", "arena", "lobby", "stats", "play", "leave", "editor", "menu", "ranks", "admin",
-            "tag", "tags", "f", "pve", "keys");
+            "match", "team", "arena", "lobby", "room", "moonmap", "stats", "play", "leave", "surrender",
+            "editor", "menu", "ranks", "admin", "tag", "tags", "f", "pve", "keys", "party", "rejoin");
 
     private static final List<String> Q_MODES = List.of("drop", "held-slot", "none");
 
@@ -75,9 +77,14 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
             case "skills" -> handleSkills(sender);
             // 玩法层子命令交给 MatchCommand（同包，无需 import）
             //   pve = PVE 的难度 / 大波次 / 据点状态与切换
-            case "match", "team", "arena", "lobby", "stats", "pve" -> new MatchCommand(plugin).handle(sender, args);
+            //   room = 动态房间（create / delete / list）
+            //   moonmap = 月面模板管理（create / import / list / load / unload）
+            case "match", "team", "arena", "lobby", "stats", "pve", "room", "moonmap" ->
+                    new MatchCommand(plugin).handle(sender, args);
             // 玩家自助退出：退出观战 / 退出队列（聊天栏的「退出观战」按钮执行的就是它）
             case "leave" -> new MatchCommand(plugin).handleLeave(sender);
+            // 玩家发起/确认本队投降（对局中；半数以上在线队友同意即结束）
+            case "surrender" -> new MatchCommand(plugin).handleSurrender(sender);
             // 武器数据编辑 GUI（管理员）
             case "editor" -> handleEditor(sender, args);
             // 玩家菜单（匹配 / 队伍选择 / 角色选择 / 排行榜）与总计排行榜 GUI
@@ -93,6 +100,10 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
             // 按键诊断：回放最近收到的原始输入事件（判断"按键到底有没有传到服务端"）
             case "keys" -> handleKeys(sender);
             case "play" -> handlePlay(sender);
+            // 派对组队：invite/accept/kick/leave/list（整队匹配、开局整组同队）
+            case "party" -> handleParty(sender, args);
+            // 断线重连：对局中掉线时限内回到原房原队（上线时自动尝试，这条是手动兜底）
+            case "rejoin" -> handleRejoin(sender);
             default -> sender.sendMessage(plugin.config().messages().prefixed("command.unknown-sub"));
         }
         return true;
@@ -459,6 +470,103 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
                 "weapons", character == null ? "-" : String.join(", ", character.weapons())));
     }
 
+    /**
+     * /taketori party <invite <玩家>|accept [房主]|kick <玩家>|leave|list> —— 派对组队。
+     * 组队后快速匹配整队进同一房间，开局分队时整组同队（人数差 ≤1 的前提下尽量不拆散）。
+     * 无参数 / list：查看当前派对状态。
+     */
+    private void handleParty(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(plugin.config().messages().prefixed("command.player-only"));
+            return;
+        }
+        var party = plugin.party();
+        String action = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "list";
+        switch (action) {
+            case "invite" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(MINI.deserialize("<red>用法：<white>/taketori party invite <玩家>"));
+                    return;
+                }
+                Player target = Bukkit.getPlayerExact(args[2]);
+                if (target == null) {
+                    sender.sendMessage(plugin.config().messages().prefixed(
+                            "command.player-not-found", "name", args[2]));
+                    return;
+                }
+                party.invite(player, target);
+            }
+            case "accept" -> {
+                UUID leaderId;
+                if (args.length >= 3) {
+                    Player leader = Bukkit.getPlayerExact(args[2]);
+                    if (leader == null) {
+                        sender.sendMessage(plugin.config().messages().prefixed(
+                                "command.player-not-found", "name", args[2]));
+                        return;
+                    }
+                    leaderId = leader.getUniqueId();
+                } else {
+                    // 不带房主名：接受最近一个有效邀请
+                    leaderId = party.pendingInviteLeader(player.getUniqueId());
+                    if (leaderId == null) {
+                        sender.sendMessage(plugin.config().messages().prefixed("party.no-invite"));
+                        return;
+                    }
+                }
+                party.accept(player, leaderId);
+            }
+            case "kick" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(MINI.deserialize("<red>用法：<white>/taketori party kick <玩家>"));
+                    return;
+                }
+                Player target = Bukkit.getPlayerExact(args[2]);
+                party.kick(player, target == null ? null : target.getUniqueId());
+            }
+            case "leave" -> party.leave(player.getUniqueId());
+            case "list" -> {
+                var current = party.partyOf(player.getUniqueId());
+                if (current == null) {
+                    sender.sendMessage(plugin.config().messages().prefixed("party.list-none"));
+                    return;
+                }
+                StringBuilder names = new StringBuilder();
+                for (UUID memberId : current.members()) {
+                    if (!names.isEmpty()) {
+                        names.append("<gray>, </gray>");
+                    }
+                    if (current.leader().equals(memberId)) {
+                        names.append("<gold>★</gold>");
+                    }
+                    names.append(playerName(memberId));
+                }
+                sender.sendMessage(plugin.config().messages().prefixed("party.list",
+                        "leader", playerName(current.leader()), "members", names.toString(),
+                        "size", current.members().size(), "max", party.maxSize()));
+            }
+            default -> sender.sendMessage(MINI.deserialize(
+                    "<red>用法：<white>/taketori party <invite|accept|kick|leave|list>"));
+        }
+    }
+
+    /** /taketori rejoin —— 手动触发断线重连（上线时已自动尝试；这条用于自动恢复没生效时的兜底）。 */
+    private void handleRejoin(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(plugin.config().messages().prefixed("command.player-only"));
+            return;
+        }
+        if (!plugin.rejoin().tryRejoin(player)) {
+            sender.sendMessage(plugin.config().messages().prefixed("rejoin.no-session"));
+        }
+    }
+
+    /** 成员显示名：派对成员断线即被移出，通常都在线；离线兜底显示 id 前缀。 */
+    private String playerName(UUID id) {
+        Player player = Bukkit.getPlayer(id);
+        return player != null ? player.getName() : id.toString().substring(0, 8);
+    }
+
     private boolean require(CommandSender sender, String permission) {
         if (sender.hasPermission(permission)) {
             return true;
@@ -621,7 +729,7 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
         }
         if (args[0].equalsIgnoreCase("arena")) {
             if (args.length == 2) {
-                return startsWith(List.of("pos1", "pos2", "wand",
+                return startsWith(List.of("setup", "pos1", "pos2", "wand",
                         "setminion", "delminion", "setbase", "delbase", "setspawn",
                         "setloot", "delloot", "setoutpost", "deloutpost", "setwait",
                         "create", "select", "delete", "enable", "disable", "list", "status"), args[1]);
@@ -630,6 +738,11 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
                     || args[1].equalsIgnoreCase("delbase")
                     || args[1].equalsIgnoreCase("setspawn"))) {
                 return startsWith(List.of("red", "blue"), args[2]);
+            }
+            if (args.length == 3 && args[1].equalsIgnoreCase("setup")) {
+                List<String> options = new ArrayList<>(List.of("done", "cancel"));
+                options.addAll(plugin.arena().all().keySet());
+                return startsWith(options, args[2]);
             }
             // 按场地 id 操作的子命令补全已有场地
             if (args.length == 3 && List.of("select", "delete", "remove", "enable", "disable")
@@ -655,13 +768,79 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
             }
             return result;
         }
+        if (args[0].equalsIgnoreCase("room")) {
+            if (args.length == 2) {
+                return startsWith(List.of("create", "delete", "list"), args[1]);
+            }
+            if (args.length == 3 && args[1].equalsIgnoreCase("create")) {
+                return startsWith(new ArrayList<>(plugin.arena().all().keySet()), args[2]);
+            }
+            if (args.length == 3 && args[1].equalsIgnoreCase("delete")) {
+                List<String> ids = new ArrayList<>();
+                for (var room : plugin.rooms().rooms()) {
+                    ids.add(room.id());
+                }
+                return startsWith(ids, args[2]);
+            }
+            return result;
+        }
+        if (args[0].equalsIgnoreCase("moonmap")) {
+            if (args.length == 2) {
+                return startsWith(List.of("create", "import", "list", "load", "unload"), args[1]);
+            }
+            if (args.length == 3 && args[1].equalsIgnoreCase("import")) {
+                // 补全服务器世界容器里的世界文件夹
+                List<String> worlds = new ArrayList<>();
+                File[] children = Bukkit.getWorldContainer().listFiles(File::isDirectory);
+                if (children != null) {
+                    for (File child : children) {
+                        if (new File(child, "level.dat").isFile()) {
+                            worlds.add(child.getName());
+                        }
+                    }
+                }
+                return startsWith(worlds, args[2]);
+            }
+            if (args.length == 3) {
+                List<String> names = new ArrayList<>();
+                File moonmaps = new File(plugin.getDataFolder(), "moonmaps");
+                File[] children = moonmaps.listFiles(File::isDirectory);
+                if (children != null) {
+                    for (File child : children) {
+                        names.add(child.getName());
+                    }
+                }
+                return startsWith(names, args[2]);
+            }
+            if (args.length == 4 && args[1].equalsIgnoreCase("import")) {
+                return startsWith(new ArrayList<>(plugin.arena().all().keySet()), args[3]);
+            }
+            return result;
+        }
         if (args[0].equalsIgnoreCase("lobby")) {
             if (args.length == 2) {
-                return startsWith(List.of("setspawn", "pos1", "pos2", "setregion", "addsign", "removesign",
-                        "list", "join", "leave", "spectate"), args[1]);
+                return startsWith(List.of("setspawn", "pos1", "pos2", "setregion", "addsign", "addstatus",
+                        "removesign", "list", "join", "leave", "spectate"), args[1]);
             }
-            if (args.length == 3 && (args[1].equalsIgnoreCase("addsign") || args[1].equalsIgnoreCase("removesign"))) {
+            if (args.length == 3 && args[1].equalsIgnoreCase("addsign")) {
                 return startsWith(LobbyAction.tabCompletions(), args[2]);
+            }
+            if (args.length == 3 && args[1].equalsIgnoreCase("addstatus")) {
+                return startsWith(new ArrayList<>(plugin.arena().all().keySet()), args[2]);
+            }
+            return result;
+        }
+        if (args[0].equalsIgnoreCase("party")) {
+            if (args.length == 2) {
+                return startsWith(List.of("invite", "accept", "kick", "leave", "list"), args[1]);
+            }
+            if (args.length == 3 && List.of("invite", "kick", "accept")
+                    .contains(args[1].toLowerCase(Locale.ROOT))) {
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    if (player.getName().toLowerCase(Locale.ROOT).startsWith(args[2].toLowerCase(Locale.ROOT))) {
+                        result.add(player.getName());
+                    }
+                }
             }
             return result;
         }

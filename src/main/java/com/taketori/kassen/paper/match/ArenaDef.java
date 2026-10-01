@@ -14,13 +14,18 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 单个场地的数据定义（多房间架构后，一个服务器可以配置多个场地，每个场地对应一个房间）。
+ * 模板定义（月之都制）：arenas.yml 的每个条目是一份"月面地图"模板——
+ * 区域、双方出生点、等待点都在模板世界里划定；玩家创建房间时以它为蓝本
+ * 异步复制出专属世界（{@code copyForWorld} 重定向世界名），结算后世界删除。
  *
- * <p>持有：月人刷新区（可多个）、道具刷新点（可多个）、双方各 N 个基地、双方出生点、
- * PVE 据点、<b>等待出生点</b>（BedWars 式匹配：开局前玩家在此中立等待），以及启停状态。</p>
+ * <p>持有：月人刷新区（可多个、带标签）、道具刷新点（可多个）、双方各 N 个基地、
+ * 双方出生点、PVE 据点、<b>等待出生点</b>，以及启停状态。</p>
  *
- * <p>一个"能开局的场地"至少需要：**至少 1 个月人刷新区** + 2×N 个基地 + 2 个出生点
+ * <p>一个"能开局的模板"至少需要：**至少 1 个月人刷新区** + 2×N 个基地 + 2 个出生点
  * + 1 个等待出生点；道具刷新点可选。本类只负责数据与就绪判定，运行时状态在 GameRoom。</p>
+ *
+ * <p>点位用 {@link Point}（世界名 + 坐标）保存：模板编辑世界卸载后数据不丢，
+ * {@link #isReady()} 只看数据完整性，不要求世界已加载。</p>
  */
 public final class ArenaDef {
 
@@ -29,16 +34,60 @@ public final class ArenaDef {
     /** 每队基地编号的硬上限：防止把编号写成几百之后遍历与提示失控。 */
     public static final int MAX_BASES_PER_TEAM = 16;
 
+    /** 月人刷新区标签：只刷新普通月人。 */
+    public static final String REGION_KIND_NORMAL = "normal";
+    /** 月人刷新区标签：普通与精英都刷新（旧配置没有标签的区域也按此处理）。 */
+    public static final String REGION_KIND_MIXED = "mixed";
+
+    /**
+     * 模板/房间通用点位：世界名 + 坐标。世界对象用时解析（{@link #toBukkitLocation()}），
+     * 模板编辑世界卸载后仍保留完整数据；{@link #inWorld} 用于克隆到房间世界。
+     */
+    public record Point(String worldName, double x, double y, double z, float yaw, float pitch) {
+
+        public static Point of(Location location) {
+            return new Point(location.getWorld().getName(), location.getX(), location.getY(), location.getZ(),
+                    location.getYaw(), location.getPitch());
+        }
+
+        public Location toLocation(World world) {
+            return new Location(world, x, y, z, yaw, pitch);
+        }
+
+        /** 解析为 Bukkit 位置；世界未加载返回 null（运行中的房间世界不会发生）。 */
+        public Location toBukkitLocation() {
+            World world = Bukkit.getWorld(worldName);
+            return world == null ? null : toLocation(world);
+        }
+
+        public Point inWorld(String newWorldName) {
+            return new Point(newWorldName, x, y, z, yaw, pitch);
+        }
+
+        public void write(ConfigurationSection section) {
+            section.set("world", worldName);
+            section.set("x", x);
+            section.set("y", y);
+            section.set("z", z);
+            section.set("yaw", (double) yaw);
+            section.set("pitch", (double) pitch);
+        }
+
+        public static Point read(ConfigurationSection section) {
+            if (section == null || !section.isString("world")) {
+                return null;
+            }
+            return new Point(section.getString("world"),
+                    section.getDouble("x"), section.getDouble("y"), section.getDouble("z"),
+                    (float) section.getDouble("yaw"), (float) section.getDouble("pitch"));
+        }
+    }
+
     private final TaketoriPlugin plugin;
     private final String id;
 
     private String display;
     private boolean enabled = true;
-
-    /** 月人刷新区标签：只刷新普通月人。 */
-    public static final String REGION_KIND_NORMAL = "normal";
-    /** 月人刷新区标签：普通与精英都刷新（旧配置没有标签的区域也按此处理）。 */
-    public static final String REGION_KIND_MIXED = "mixed";
 
     /** 月人刷新区：编号 → 区域（1 起）。 */
     private final Map<Integer, CuboidRegion> minionRegions = new LinkedHashMap<>();
@@ -46,18 +95,20 @@ public final class ArenaDef {
     private final Map<Integer, String> minionRegionKinds = new LinkedHashMap<>();
     /** 道具刷新点：编号 → 区域（1 起）。 */
     private final Map<Integer, CuboidRegion> lootRegions = new LinkedHashMap<>();
+    private final Map<TeamId, Map<Integer, CuboidRegion>> bases = new EnumMap<>(TeamId.class);
+    private final Map<TeamId, Point> spawns = new EnumMap<>(TeamId.class);
+
+    /** PVE 保卫据点的位置（雪傀儡站在这里）；没设置时用第一个月人刷新区中心。 */
+    private Point outpost;
+    /** 中立等待出生点：匹配后玩家在此集结等待倒计时（开局才分队）。 */
+    private Point waitSpawn;
+    /** 等待区区域（可选）：设置了就用整个选区，加入者在区域内随机分布；未设置时用 waitSpawn 单点。 */
+    private CuboidRegion waitRegion;
 
     // ---- 本场地月人刷新节奏（arenas.yml 的 minion-spawn 段；null = 用 config.yml 的 minion 全局默认值）----
     private Integer spawnIntervalSeconds;
     private Integer spawnPerSpawn;
     private Integer spawnMaxAlive;
-    private final Map<TeamId, Map<Integer, CuboidRegion>> bases = new EnumMap<>(TeamId.class);
-    private final Map<TeamId, Location> spawns = new EnumMap<>(TeamId.class);
-
-    /** PVE 保卫据点的位置（雪傀儡站在这里）；没设置时用第一个月人刷新区中心。 */
-    private Location outpost;
-    /** 中立等待出生点：匹配后玩家在此集结等待倒计时（开局才分队）。 */
-    private Location waitSpawn;
 
     public ArenaDef(TaketoriPlugin plugin, String id) {
         this.plugin = plugin;
@@ -86,6 +137,73 @@ public final class ArenaDef {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    // ---------------------------------------------------------------- 模板世界与克隆
+
+    /** 本模板绑定的世界名（等待区 → 等待点 → 任一出生点 → 任一区域，取第一个可用的）。 */
+    public String worldName() {
+        if (waitRegion != null) {
+            return waitRegion.worldName();
+        }
+        if (waitSpawn != null) {
+            return waitSpawn.worldName();
+        }
+        for (TeamId team : TeamId.values()) {
+            Point spawn = spawns.get(team);
+            if (spawn != null) {
+                return spawn.worldName();
+            }
+        }
+        for (CuboidRegion region : regions()) {
+            return region.worldName();
+        }
+        return null;
+    }
+
+    /** 本模板绑定的世界（未加载返回 null；复制世界文件夹不依赖世界对象）。 */
+    public World arenaWorld() {
+        String name = worldName();
+        return name == null ? null : Bukkit.getWorld(name);
+    }
+
+    /**
+     * 以本模板为蓝本克隆出<b>房间专属</b>定义：全部区域与点位重定向到房间世界。
+     * 结果不持久化（不写回 arenas.yml），生命周期与房间一致。
+     */
+    public ArenaDef copyForWorld(String worldName) {
+        ArenaDef copy = new ArenaDef(plugin, id);
+        copy.display = display;
+        copy.enabled = enabled;
+        for (Map.Entry<Integer, CuboidRegion> entry : minionRegions.entrySet()) {
+            copy.minionRegions.put(entry.getKey(), entry.getValue().inWorld(worldName));
+            copy.minionRegionKinds.put(entry.getKey(), minionRegionKind(entry.getKey()));
+        }
+        for (Map.Entry<Integer, CuboidRegion> entry : lootRegions.entrySet()) {
+            copy.lootRegions.put(entry.getKey(), entry.getValue().inWorld(worldName));
+        }
+        for (TeamId team : TeamId.values()) {
+            for (Map.Entry<Integer, CuboidRegion> entry : bases(team).entrySet()) {
+                copy.bases.get(team).put(entry.getKey(), entry.getValue().inWorld(worldName));
+            }
+            Point spawn = spawns.get(team);
+            if (spawn != null) {
+                copy.spawns.put(team, spawn.inWorld(worldName));
+            }
+        }
+        if (outpost != null) {
+            copy.outpost = outpost.inWorld(worldName);
+        }
+        if (waitSpawn != null) {
+            copy.waitSpawn = waitSpawn.inWorld(worldName);
+        }
+        if (waitRegion != null) {
+            copy.waitRegion = waitRegion.inWorld(worldName);
+        }
+        copy.spawnIntervalSeconds = spawnIntervalSeconds;
+        copy.spawnPerSpawn = spawnPerSpawn;
+        copy.spawnMaxAlive = spawnMaxAlive;
+        return copy;
     }
 
     // ---------------------------------------------------------------- 月人刷新区
@@ -230,7 +348,7 @@ public final class ArenaDef {
     }
 
     public void setSpawn(TeamId team, Location location) {
-        spawns.put(team, location == null ? null : location.clone());
+        spawns.put(team, location == null || location.getWorld() == null ? null : Point.of(location));
     }
 
     public CuboidRegion base(TeamId team, int index) {
@@ -307,15 +425,15 @@ public final class ArenaDef {
         return map == null ? 0 : map.size();
     }
 
-    public Location spawn(TeamId team) {
-        Location location = spawns.get(team);
-        return location == null ? null : location.clone();
+    /** 双方出生点（点位；世界名 + 坐标）。 */
+    public Point spawn(TeamId team) {
+        return spawns.get(team);
     }
 
     // ---------------------------------------------------------------- 据点（PVE）
 
     public void setOutpost(Location location) {
-        this.outpost = location == null ? null : location.clone();
+        this.outpost = location == null || location.getWorld() == null ? null : Point.of(location);
     }
 
     public void clearOutpost() {
@@ -323,31 +441,49 @@ public final class ArenaDef {
     }
 
     /** 据点位置；没显式设置时回落到第一个月人刷新区中心（还没有区域就返回 null）。 */
-    public Location outpost() {
-        if (outpost != null && outpost.getWorld() != null) {
-            return outpost.clone();
+    public Point outpost() {
+        if (outpost != null) {
+            return outpost;
         }
         CuboidRegion region = minionRegion(1);
-        return region == null ? null : region.center();
+        return region == null ? null : region.centerPoint();
     }
 
     public boolean hasOutpost() {
-        return outpost != null && outpost.getWorld() != null;
+        return outpost != null;
     }
 
     // ---------------------------------------------------------------- 等待出生点
 
     public void setWaitSpawn(Location location) {
-        this.waitSpawn = location == null ? null : location.clone();
+        this.waitSpawn = location == null || location.getWorld() == null ? null : Point.of(location);
+    }
+
+    /** 把选区设为等待区区域（加入者在区域内随机分布）；null 清除区域、回退到 wait-spawn 单点。 */
+    public void setWaitRegion(CuboidRegion region) {
+        this.waitRegion = region;
+    }
+
+    /** 等待区区域；未设置返回 null（此时用 wait-spawn 单点）。 */
+    public CuboidRegion waitRegion() {
+        return waitRegion;
+    }
+
+    /** 等待区的拉回目标：有区域用其中心，否则用单点；世界未加载返回 null。 */
+    public Location waitAreaCenterOrSpawn() {
+        if (waitRegion != null) {
+            return waitRegion.center();
+        }
+        return waitSpawn == null ? null : waitSpawn.toBukkitLocation();
     }
 
     /** 中立等待出生点（未设置返回 null）。 */
-    public Location waitSpawn() {
-        return waitSpawn == null ? null : waitSpawn.clone();
+    public Point waitSpawn() {
+        return waitSpawn;
     }
 
     public boolean hasWaitSpawn() {
-        return waitSpawn != null && waitSpawn.getWorld() != null;
+        return waitSpawn != null || waitRegion != null;
     }
 
     // ---------------------------------------------------------------- 月人刷新节奏（minion-spawn）
@@ -427,7 +563,7 @@ public final class ArenaDef {
 
     // ---------------------------------------------------------------- 就绪判定
 
-    /** 场地是否已具备开局条件（等待出生点为多房间匹配的必备项）。 */
+    /** 模板是否已具备开局条件（等待出生点为动态房间的必备项；不要求世界已加载）。 */
     public boolean isReady() {
         if (minionRegions.isEmpty() || !hasWaitSpawn()) {
             return false;
@@ -467,7 +603,7 @@ public final class ArenaDef {
     // ---------------------------------------------------------------- 持久化
 
     /**
-     * 从配置段读入单个场地。新格式的段是 {@code arenas.<id>}；
+     * 从配置段读入单个模板。新格式的段是 {@code arenas.<id>}；
      * 旧版 arena.yml 的根节点结构与单场地段一致，迁移时直接把根节点传进来即可。
      */
     public void read(ConfigurationSection section) {
@@ -478,6 +614,7 @@ public final class ArenaDef {
         spawns.clear();
         outpost = null;
         waitSpawn = null;
+        waitRegion = null;
         spawnIntervalSeconds = null;
         spawnPerSpawn = null;
         spawnMaxAlive = null;
@@ -497,19 +634,6 @@ public final class ArenaDef {
             setMinionRegion(1, legacy);
         }
         readRegions(section.getConfigurationSection("loot-regions"), lootRegions);
-
-        ConfigurationSection minionSpawnSection = section.getConfigurationSection("minion-spawn");
-        if (minionSpawnSection != null) {
-            if (minionSpawnSection.isInt("interval-seconds")) {
-                spawnIntervalSeconds = minionSpawnSection.getInt("interval-seconds");
-            }
-            if (minionSpawnSection.isInt("per-spawn")) {
-                spawnPerSpawn = minionSpawnSection.getInt("per-spawn");
-            }
-            if (minionSpawnSection.isInt("max-alive")) {
-                spawnMaxAlive = minionSpawnSection.getInt("max-alive");
-            }
-        }
 
         ConfigurationSection baseSection = section.getConfigurationSection("bases");
         if (baseSection != null) {
@@ -536,14 +660,43 @@ public final class ArenaDef {
         ConfigurationSection spawnSection = section.getConfigurationSection("spawns");
         if (spawnSection != null) {
             for (TeamId team : TeamId.values()) {
-                Location location = readLocation(spawnSection.getConfigurationSection(team.key()));
-                if (location != null) {
-                    spawns.put(team, location);
+                Point spawn = Point.read(spawnSection.getConfigurationSection(team.key()));
+                if (spawn != null) {
+                    spawns.put(team, spawn);
                 }
             }
         }
-        outpost = readLocation(section.getConfigurationSection("outpost"));
-        waitSpawn = readLocation(section.getConfigurationSection("wait-spawn"));
+        outpost = Point.read(section.getConfigurationSection("outpost"));
+        waitSpawn = Point.read(section.getConfigurationSection("wait-spawn"));
+        waitRegion = CuboidRegion.read(section.getConfigurationSection("wait-region"));
+
+        ConfigurationSection minionSpawnSection = section.getConfigurationSection("minion-spawn");
+        if (minionSpawnSection != null) {
+            if (minionSpawnSection.isInt("interval-seconds")) {
+                spawnIntervalSeconds = minionSpawnSection.getInt("interval-seconds");
+            } else {
+                warnNonInt(minionSpawnSection, "interval-seconds");
+            }
+            if (minionSpawnSection.isInt("per-spawn")) {
+                spawnPerSpawn = minionSpawnSection.getInt("per-spawn");
+            } else {
+                warnNonInt(minionSpawnSection, "per-spawn");
+            }
+            if (minionSpawnSection.isInt("max-alive")) {
+                spawnMaxAlive = minionSpawnSection.getInt("max-alive");
+            } else {
+                warnNonInt(minionSpawnSection, "max-alive");
+            }
+        }
+    }
+
+    /** 键被显式写出但不是整数：静默忽略会意外回落全局默认值，必须警告。 */
+    private void warnNonInt(ConfigurationSection section, String key) {
+        if (!section.isSet(key)) {
+            return;
+        }
+        plugin.getLogger().warning("场地 [" + id + "] minion-spawn." + key
+                + " 不是整数（值: " + section.getString(key) + "），已忽略并使用默认值。");
     }
 
     private void readRegions(ConfigurationSection section, Map<Integer, CuboidRegion> target) {
@@ -582,7 +735,7 @@ public final class ArenaDef {
         }
     }
 
-    /** 把本场地写入 {@code arenas.<id>} 段。 */
+    /** 把本模板写入 {@code arenas.<id>} 段。 */
     public void write(ConfigurationSection section) {
         section.set("display", display());
         section.set("enabled", enabled);
@@ -601,16 +754,19 @@ public final class ArenaDef {
             }
         }
         for (TeamId team : TeamId.values()) {
-            Location spawn = spawns.get(team);
-            if (spawn != null && spawn.getWorld() != null) {
-                writeLocation(section.createSection("spawns." + team.key()), spawn);
+            Point spawn = spawns.get(team);
+            if (spawn != null) {
+                spawn.write(section.createSection("spawns." + team.key()));
             }
         }
-        if (outpost != null && outpost.getWorld() != null) {
-            writeLocation(section.createSection("outpost"), outpost);
+        if (outpost != null) {
+            outpost.write(section.createSection("outpost"));
         }
-        if (waitSpawn != null && waitSpawn.getWorld() != null) {
-            writeLocation(section.createSection("wait-spawn"), waitSpawn);
+        if (waitSpawn != null) {
+            waitSpawn.write(section.createSection("wait-spawn"));
+        }
+        if (waitRegion != null) {
+            waitRegion.write(section.createSection("wait-region"));
         }
         if (hasMinionSpawnSettings()) {
             ConfigurationSection spawnSection = section.createSection("minion-spawn");
@@ -624,28 +780,5 @@ public final class ArenaDef {
                 spawnSection.set("max-alive", spawnMaxAlive);
             }
         }
-    }
-
-    /** 读取一个位置段；世界不存在时告警并返回 null。 */
-    static Location readLocation(ConfigurationSection section) {
-        if (section == null || !section.isString("world")) {
-            return null;
-        }
-        World world = Bukkit.getWorld(section.getString("world"));
-        if (world == null) {
-            return null;
-        }
-        return new Location(world,
-                section.getDouble("x"), section.getDouble("y"), section.getDouble("z"),
-                (float) section.getDouble("yaw"), (float) section.getDouble("pitch"));
-    }
-
-    static void writeLocation(ConfigurationSection section, Location location) {
-        section.set("world", location.getWorld().getName());
-        section.set("x", location.getX());
-        section.set("y", location.getY());
-        section.set("z", location.getZ());
-        section.set("yaw", (double) location.getYaw());
-        section.set("pitch", (double) location.getPitch());
     }
 }

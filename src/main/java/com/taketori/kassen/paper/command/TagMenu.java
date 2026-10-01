@@ -10,6 +10,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -147,6 +148,14 @@ public final class TagMenu implements Listener {
     }
 
     // ---------------------------------------------------------------- 点击
+
+    /** 拖拽同样不允许在本菜单分发物品（与点击取消保持一致）。 */
+    @EventHandler
+    public void onDrag(InventoryDragEvent event) {
+        if (event.getInventory().getHolder() instanceof Holder) {
+            event.setCancelled(true);
+        }
+    }
 
     @EventHandler
     public void onClick(InventoryClickEvent event) {

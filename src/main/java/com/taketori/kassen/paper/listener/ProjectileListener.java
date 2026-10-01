@@ -91,6 +91,9 @@ public final class ProjectileListener implements Listener {
                 double ratio = Math.min(1.0D, distance / (radius + 0.5D));
                 double falloff = 1.0D - (1.0D - minFalloff) * ratio;
                 applyDamage(living, damage * falloff, shooter);
+                if (shooter instanceof Player owner) {
+                    plugin.damageNumbers().hit(owner, living, damage * falloff);   // 伤害数字（A1）
+                }
                 if (ignite && igniteTicks > 0) {
                     living.setFireTicks(Math.max(living.getFireTicks(), igniteTicks));
                 }

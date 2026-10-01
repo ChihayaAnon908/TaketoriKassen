@@ -40,6 +40,8 @@ public final class ShockwaveSkill implements Skill {
         if (player.getAttackCooldown() < context.dbl("min-charge", 0.9D)) {
             return SkillResult.NO_TARGET;
         }
+        // 重技能施法演出（D13）：title + 低沉施法音，与瞬发右键技能的"轻快"区分
+        plugin.fx().castHeavy(player, "冲击波");
 
         double damage = context.dbl("damage", 10.0D);
         double radius = context.dbl("radius", 4.0D);
@@ -64,6 +66,7 @@ public final class ShockwaveSkill implements Skill {
             }
             double ratio = Math.max(minFalloff, 1.0D - distance / (radius + 0.5D));
             living.damage(damage * ratio, player);
+            plugin.damageNumbers().hit(player, living, damage * ratio);   // 伤害数字（A1）
 
             Vector push = living.getLocation().toVector().subtract(center.toVector());
             push.setY(0.0D);

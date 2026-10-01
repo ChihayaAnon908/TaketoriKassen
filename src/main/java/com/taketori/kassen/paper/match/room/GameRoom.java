@@ -36,7 +36,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ThreadLocalRandom;
+
 
 /**
  * 游戏房间：一个启用场地对应一个房间，可反复开局、多房间并发互不干扰。
@@ -73,8 +73,16 @@ public final class GameRoom {
     private final TaketoriPlugin plugin;
     private final RoomManager manager;
     private final ArenaDef arena;
-    /** 创建序号：快速加入平局时优先先创建的房间。 */
+    /** 创建序号：房间 id（自增数字），快速加入平局时优先先创建的房间。 */
     private final long order;
+    /** 模板 id（arenas.yml 条目名，本房间世界由它复制而来）。 */
+    private final String templateId;
+    /** 房主（创建者）；快速加入自动建房时为发起玩家。 */
+    private final UUID creatorId;
+    /** 房间创建时间（毫秒）。 */
+    private final long createdAt;
+    /** 等待房全员离线的起始时刻（0 = 房内有人）；超过 room.empty-dispose-seconds 解散回收世界。 */
+    private long emptySinceMillis;
 
     private Phase phase = Phase.WAITING;
     /** 房间模式（每房独立，不再写回全局 config）。 */
@@ -111,10 +119,62 @@ public final class GameRoom {
     /** 对局区域四周屏障墙（每局重建/还原）。 */
     private final BarrierBuilder barrier = new BarrierBuilder(this);
 
-    // ---- 开局背包备份：开局清掉玩家自带物品，结算返还 ----
-    private final Map<UUID, org.bukkit.inventory.ItemStack[]> backupContents = new HashMap<>();
-    private final Map<UUID, org.bukkit.inventory.ItemStack[]> backupArmor = new HashMap<>();
-    private final Map<UUID, org.bukkit.inventory.ItemStack> backupOffhand = new HashMap<>();
+    // ---- 进房封存（BedWars2020 PlayerGoods 式全量快照）：自带背包/状态封存，结算或退房返还 ----
+    private final Map<UUID, InventorySnapshot> backups = new HashMap<>();
+    /** 整局成员缓存（membersCache 双轨）：掉线移出 teams 后仍保留，用于结算名单。 */
+    private final Map<UUID, TeamId> rosterCache = new HashMap<>();
+    /** 对局缺人（可补位）持续的起始时刻；补满即清零，超过宽限期无人补位 → 缺人队判负。 */
+    private long understaffedSinceMillis;
+
+    /**
+     * 进房封存的玩家状态快照（对齐 BedWars2020 的 PlayerGoods）：背包三件套、血量、饥饿、
+     * 经验、游戏模式、飞行、药水效果。{@link #restoreTo} 清掉当前状态后原样写回。
+     */
+    public record InventorySnapshot(org.bukkit.inventory.ItemStack[] contents,
+                                    org.bukkit.inventory.ItemStack[] armor,
+                                    org.bukkit.inventory.ItemStack offhand,
+                                    double health, int foodLevel,
+                                    int level, float exp,
+                                    GameMode gameMode, boolean flying,
+                                    List<PotionEffect> potions) {
+
+        public void restoreTo(Player player) {
+            var inv = player.getInventory();
+            inv.clear();
+            if (contents != null) {
+                inv.setStorageContents(contents);
+            }
+            if (armor != null) {
+                inv.setArmorContents(armor);
+            }
+            if (offhand != null) {
+                inv.setItemInOffHand(offhand);
+            }
+            for (PotionEffect effect : new ArrayList<>(player.getActivePotionEffects())) {
+                player.removePotionEffect(effect.getType());
+            }
+            if (potions != null) {
+                for (PotionEffect effect : potions) {
+                    if (effect != null) {
+                        player.addPotionEffect(effect);
+                    }
+                }
+            }
+            player.setExp(exp);
+            player.setLevel(level);
+            player.setFoodLevel(Math.max(0, foodLevel));
+            player.setGameMode(gameMode == null ? GameMode.SURVIVAL : gameMode);
+            double maxHealth = player.getMaxHealth();
+            player.setHealth(health <= 0.0D ? maxHealth : Math.max(1.0D, Math.min(health, maxHealth)));
+            if (flying) {
+                try {
+                    player.setFlying(true);
+                } catch (Throwable ignored) {
+                    // 生存模式不接受飞行：静默忽略
+                }
+            }
+        }
+    }
 
     // ---- 倒计时 / 笼子 / 结算的定时状态 ----
     /** STARTING 倒计时起点（毫秒）。 */
@@ -125,16 +185,22 @@ public final class GameRoom {
     private long countdownFullMillis;
     /** 是否已切过满员短倒计时（只播报一次）。 */
     private boolean countdownFull;
+    /** 是否已切过半挡倒计时（人数过半场时一次性压缩）。 */
+    private boolean countdownHalf;
     /** CAGED 解除任务句柄。 */
     private BukkitTask cageTask;
     /** ENDING 延迟收尾任务句柄。 */
     private BukkitTask endTask;
 
-    GameRoom(TaketoriPlugin plugin, RoomManager manager, ArenaDef arena, long order) {
+    GameRoom(TaketoriPlugin plugin, RoomManager manager, ArenaDef arena, long order,
+             String templateId, UUID creatorId) {
         this.plugin = plugin;
         this.manager = manager;
         this.arena = arena;
         this.order = order;
+        this.templateId = templateId == null ? arena.id() : templateId;
+        this.creatorId = creatorId;
+        this.createdAt = System.currentTimeMillis();
         this.pve = "pve".equalsIgnoreCase(plugin.getConfig().getString("match.mode", "pvp"));
         this.minions = new MinionSpawner(this);
         this.baseCapture = new BaseCaptureManager(this);
@@ -156,17 +222,37 @@ public final class GameRoom {
         return arena;
     }
 
-    /** 房间 id 与场地 id 相同。 */
+    /** 房间 id = 创建序号（自增数字字符串），与房间世界名 kassen_<id> 对应。 */
     public String id() {
-        return arena.id();
+        return Long.toString(order);
+    }
+
+    /** 模板 id（arenas.yml 条目名，本房间世界由它复制而来）。 */
+    public String templateId() {
+        return templateId;
+    }
+
+    /** 房主（创建者）。 */
+    public UUID creatorId() {
+        return creatorId;
+    }
+
+    /** 房间创建时间（毫秒）。 */
+    public long createdAt() {
+        return createdAt;
     }
 
     public String display() {
-        return arena.display();
+        return arena.display() + " · 第" + order + "场";
     }
 
     public long order() {
         return order;
+    }
+
+    /** 房间专属世界（克隆模板时全部点位已重定向到它）。 */
+    public World world() {
+        return arena.arenaWorld();
     }
 
     public Phase phase() {
@@ -220,8 +306,9 @@ public final class GameRoom {
     }
 
     /**
-     * 友伤保护是否生效（同一队的玩家互相不造成伤害）。
-     * auto（默认）：PVP 开启、PVE 关闭；on：两种模式都保护；off：都不保护。
+     * 友伤保护是否生效（同一房间同一队的玩家互相不造成伤害）。
+     * auto（默认）：PVP 与 PVE 均开启保护（PVE 开局播报即承诺"玩家之间不会互相造成伤害"）；
+     * on：两种模式都保护；off：都不保护。
      */
     public boolean isFriendlyFireProtected() {
         String policy = rules().friendlyFire() == null
@@ -229,7 +316,7 @@ public final class GameRoom {
         return switch (policy) {
             case "on", "true", "always", "yes" -> true;
             case "off", "false", "never", "no" -> false;
-            default -> !isPve();
+            default -> true;
         };
     }
 
@@ -326,9 +413,10 @@ public final class GameRoom {
         return teams.get(uuid);
     }
 
-    /** 开局分队时调用：登记队伍、名字、记分板。 */
+    /** 开局分队时调用：登记队伍（在场名单 + 整局成员缓存）、名字、记分板。 */
     public void join(Player player, TeamId team) {
         teams.put(player.getUniqueId(), team);
+        rosterCache.put(player.getUniqueId(), team);
         playerNames.put(player.getUniqueId(), player.getName());
         playerScores.putIfAbsent(player.getUniqueId(), 0);
         board.showTo(player);
@@ -342,6 +430,12 @@ public final class GameRoom {
             // 对局中被移出（管理员 team none 等）：把开局前备份的背包还回去
             restoreInventoryIfAny(player);
         }
+    }
+
+    /** 对局中退出（掉线/主动）：从在场名单移除（槽位可被补位），整局成员缓存保留到结算；只撤记分板。 */
+    public void quitMatch(UUID uuid) {
+        teams.remove(uuid);
+        board.hide(Bukkit.getPlayer(uuid));
     }
 
     /**
@@ -361,13 +455,53 @@ public final class GameRoom {
             join(player, TeamId.RED);
             return null;
         }
-        int maxPerTeam = teamSizeCap();
-        boolean sameTeam = teams.get(player.getUniqueId()) == team;
-        if (!sameTeam && teamPlayers(team).size() >= maxPerTeam) {
-            return team.display() + " 已满（每队上限 " + maxPerTeam + " 人）。";
+        TeamId current = teams.get(player.getUniqueId());
+        if (current == team) {
+            return null;   // 已在该队
+        }
+        if (!canChooseTeam(player, team)) {
+            TeamId other = team == TeamId.RED ? TeamId.BLUE : TeamId.RED;
+            int targetSize = teamPlayers(team).size();
+            int otherSize = teamPlayers(other).size();
+            if (targetSize >= teamSizeCap()) {
+                return team.display() + " 已满（每队上限 " + teamSizeCap() + " 人）。";
+            }
+            return team.display() + " 人数多于" + other.display()
+                    + "（" + targetSize + " : " + otherSize
+                    + "），为保持平衡请选择" + other.display() + "。";
         }
         join(player, team);
         return null;
+    }
+
+    /**
+     * 平衡规则（等待区手动选边）：把玩家从当前归属取出后，只能加入人数<b>不超过对方</b>
+     * 的队伍——即加入后两队人数差最多 1。去人多的一边（会让差扩大到 2+）一律禁止。
+     *
+     * <p>例：红 3 蓝 0，新玩家只能选蓝（0 ≤ 3）；红 2 蓝 2 时两边都可选（加入后 3:2）；
+     * 蓝队玩家在红 1 蓝 3 时可以换到红（取出后红 1 ≤ 蓝 2）。</p>
+     */
+    public boolean canChooseTeam(Player player, TeamId team) {
+        if (player == null || team == null || isPve()) {
+            return isPve();
+        }
+        int target = 0;
+        int other = 0;
+        for (Map.Entry<UUID, TeamId> entry : teams.entrySet()) {
+            // 判定时先把玩家自己从计数里取出（他可能正从另一队换过来）
+            if (entry.getKey().equals(player.getUniqueId())) {
+                continue;
+            }
+            if (entry.getValue() == team) {
+                target++;
+            } else {
+                other++;
+            }
+        }
+        if (target >= teamSizeCap()) {
+            return false;
+        }
+        return target <= other;
     }
 
     public List<Player> teamPlayers(TeamId team) {
@@ -390,7 +524,119 @@ public final class GameRoom {
 
     public void clearTeams() {
         teams.clear();
+        rosterCache.clear();
         playerNames.clear();
+    }
+
+    // ---------------------------------------------------------------- 补位与投降
+
+    /** 投降表决：发起后 30 秒内，半数以上在线队友确认即整场判负结束。 */
+    private static final long SURRENDER_WINDOW_MILLIS = 30_000L;
+
+    private record SurrenderVote(Set<UUID> confirmed, long deadlineMillis) {
+    }
+
+    private final Map<TeamId, SurrenderVote> surrenderVotes = new HashMap<>();
+
+    /** 对局中补位：还需要人的队伍（严格人少的一方）；不需要补位返回 null。 */
+    public TeamId reinforcementTeam() {
+        if (phase != Phase.PLAYING) {
+            return null;
+        }
+        if (isPve()) {
+            return rosterSize(TeamId.RED) < maxPlayers() ? TeamId.RED : null;
+        }
+        int cap = teamSizeCap();
+        int red = rosterSize(TeamId.RED);
+        int blue = rosterSize(TeamId.BLUE);
+        // 只补"严格人少"的一方：不掉线不补人，避免补位反而打破均势
+        if (red < cap && red < blue) {
+            return TeamId.RED;
+        }
+        if (blue < cap && blue < red) {
+            return TeamId.BLUE;
+        }
+        return null;
+    }
+
+    private int rosterSize(TeamId team) {
+        int count = 0;
+        for (TeamId value : teams.values()) {
+            if (value == team) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 对局中补位：把玩家直接编入缺人的队伍并传送进场——封存自带背包、发对局装备、
+     * 记分板与出生增益一应俱全；结算后与其他参赛者同等返还。
+     */
+    public void joinAsReinforcement(Player player, TeamId team) {
+        join(player, team);
+        stashAndClearInventory(player);
+        String charId = characterIdOf(player.getUniqueId());
+        if (charId != null) {
+            plugin.giveCharacterWeapons(player, charId);
+        }
+        ArenaDef.Point spawnPoint = arena.spawn(team);
+        if (spawnPoint != null) {
+            player.teleport(spawnPoint.toLocation(world()));
+        }
+        board.showTo(player);
+        applySpawnBuff(player);
+        broadcast("<gray>" + player.getName() + " 补位加入 " + team.colorTag() + team.display()
+                + "<gray>！装备已发放，直接参战。");
+        board.updateAll();
+    }
+
+    /**
+     * 发起/确认本队投降（仅 PLAYING 阶段）：首次调用发起表决，之后每次调用算一票。
+     * 30 秒内在线队友半数以上（含发起者）确认即 {@link #finish} 判对方胜。
+     */
+    public void surrender(Player player) {
+        if (phase != Phase.PLAYING) {
+            return;
+        }
+        TeamId team = teams.get(player.getUniqueId());
+        if (team == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        SurrenderVote vote = surrenderVotes.get(team);
+        if (vote == null || now > vote.deadlineMillis()) {
+            vote = new SurrenderVote(new LinkedHashSet<>(), now + SURRENDER_WINDOW_MILLIS);
+            surrenderVotes.put(team, vote);
+        }
+        vote.confirmed().add(player.getUniqueId());
+        // 清除离线 / 已不在本队者的旧票：否则可能有人掉线后，靠其离线票通过表决
+        vote.confirmed().removeIf(uuid -> {
+            Player voter = Bukkit.getPlayer(uuid);
+            return voter == null || !voter.isOnline() || teams.get(uuid) != team;
+        });
+        int online = teamPlayers(team).size();
+        int need = Math.max(1, (online + 1) / 2);
+        int confirmed = vote.confirmed().size();
+        if (confirmed >= need) {
+            surrenderVotes.remove(team);
+            broadcast("<red>" + team.display() + " 投降表决通过（" + confirmed + "/" + need
+                    + "），本场结束！");
+            finish(team == TeamId.RED ? TeamId.BLUE : TeamId.RED);
+            return;
+        }
+        net.kyori.adventure.text.Component voteMessage = MINI.deserialize(
+                "<yellow>" + player.getName() + " 同意投降 <dark_gray>(" + confirmed + "/" + need
+                        + ") <gray>—— <click:run_command:'/taketori surrender'>"
+                        + "<hover:show_text:'<gray>同意结束本局，判对方获胜'>"
+                        + "<red><bold>[同意投降]</bold></red></hover></click>"
+                        + " <dark_gray>30 秒内半数以上在线队友同意即生效");
+        for (Player teammate : teamPlayers(team)) {
+            teammate.sendMessage(voteMessage);
+        }
+        if (plugin.config().debug()) {
+            plugin.getLogger().info("[room " + id() + "] 投降表决：" + team.key() + " " + confirmed + "/" + need);
+        }
     }
 
     // ---------------------------------------------------------------- 本局击杀计数
@@ -587,6 +833,7 @@ public final class GameRoom {
         lastScoreReason = "-";
         lastScoreAmount = 0;
         winner = null;
+        surrenderVotes.clear();
     }
 
     public int teamScore(TeamId team) {
@@ -670,7 +917,8 @@ public final class GameRoom {
     // ---------------------------------------------------------------- 生命周期
 
     /**
-     * 倒计时归零后开局：锁定在线等待者名单 → PVE 全红 / PVP 均衡随机分队（差 ≤1）
+     * 倒计时归零后开局：锁定在线等待者名单 → PVE 全红 / PVP 沿用玩家手动选择的队伍
+     * （未选队伍不开局）
      * → 角色裁决 → 传送出生点 / 记分板 / 出生增益 → 建玻璃笼进 CAGED（无敌冻结）
      * → 到时笼解除进 PLAYING 并启动该房间刷怪/道具/占点(PVP)/据点(PVE) → 播报。
      *
@@ -686,41 +934,61 @@ public final class GameRoom {
         if (!arena.isReady()) {
             return "场地未就绪，还缺：" + arena.missingHint();
         }
-        // 锁定名单：只取在线等待者；PVE 全红，PVP 均衡随机分队（人数差 ≤1）
+        // 锁定名单：只取在线等待者；PVE 全红，PVP 沿用玩家在等待区手动选择的队伍
         List<Player> roster = waitingPlayers();
         if (roster.isEmpty()) {
             return "房间里一个人都没有。";
         }
-        // 开局瞬间统一分队：等待期的临时选边/管理指派全部丢弃，按锁定名单均衡重分
-        teams.clear();
+        java.util.Set<UUID> rosterIds = new java.util.HashSet<>();
+        for (Player player : roster) {
+            rosterIds.add(player.getUniqueId());
+        }
+        // 以锁定名单为准：清掉名单外的队伍/名字残留（被管理指派过的离线者或旧等待者）
+        teams.keySet().removeIf(id -> !rosterIds.contains(id));
+        playerNames.keySet().removeIf(id -> !rosterIds.contains(id));
+
         if (isPve()) {
+            // PVE：所有人统一红队（之前选成别的也并回红队）
             for (Player player : roster) {
-                join(player, TeamId.RED);
+                if (teams.get(player.getUniqueId()) != TeamId.RED) {
+                    join(player, TeamId.RED);
+                }
             }
         } else {
-            roster = new ArrayList<>(roster);
-            java.util.Collections.shuffle(roster);
-            int maxPerTeam = teamSizeCap();
-            int red = 0;
-            int blue = 0;
+            // PVP：手动选边，开局不再自动分队。检查每个人是否都选了队伍
+            List<String> missing = new ArrayList<>();
             for (Player player : roster) {
-                TeamId team;
-                if (red >= maxPerTeam) {
-                    team = TeamId.BLUE;
-                } else if (blue >= maxPerTeam) {
-                    team = TeamId.RED;
-                } else if (red < blue) {
-                    team = TeamId.RED;
-                } else if (blue < red) {
-                    team = TeamId.BLUE;
-                } else {
-                    team = ThreadLocalRandom.current().nextBoolean() ? TeamId.RED : TeamId.BLUE;
+                if (teams.get(player.getUniqueId()) == null) {
+                    missing.add(player.getName());
                 }
-                join(player, team);
-                if (team == TeamId.RED) {
-                    red++;
-                } else {
-                    blue++;
+            }
+            if (!missing.isEmpty()) {
+                if (!force) {
+                    // 不开局：已选队伍保留，把锁定的名单退回等待区
+                    waiting.clear();
+                    for (Player player : roster) {
+                        waiting.add(player.getUniqueId());
+                    }
+                    return "还有玩家未选择队伍：<white>" + String.join("、", missing)
+                            + "</white> <gray>——选完队伍才能开局（只能去人数不占优的一边）。";
+                }
+                // force 兜底：未选者依次补进当前人少的队
+                for (String name : missing) {
+                    Player unassigned = null;
+                    for (Player player : roster) {
+                        if (player.getName().equals(name)) {
+                            unassigned = player;
+                        }
+                    }
+                    if (unassigned == null) {
+                        continue;
+                    }
+                    TeamId fallback = teamPlayers(TeamId.RED).size() <= teamPlayers(TeamId.BLUE).size()
+                            ? TeamId.RED : TeamId.BLUE;
+                    if (teamPlayers(fallback).size() >= teamSizeCap()) {
+                        fallback = fallback == TeamId.RED ? TeamId.BLUE : TeamId.RED;
+                    }
+                    join(unassigned, fallback);
                 }
             }
         }
@@ -729,13 +997,16 @@ public final class GameRoom {
         boolean red = !teamPlayers(TeamId.RED).isEmpty();
         boolean blue = !teamPlayers(TeamId.BLUE).isEmpty();
         if (!isPve() && (!red || !blue) && !force) {
-            // 分队没成（理论上均衡分队不会出现）：解散名单，把锁定的等待者退回等待区
-            teams.clear();
+            // 双方都缺人：退回等待区，已手动选择的队伍保留
             for (Player player : roster) {
                 waiting.add(player.getUniqueId());
             }
             return "双方都需要至少一名玩家（人数不够也想开：/taketori match force）。";
         }
+
+        // 重建整局成员缓存：最终名单 + 最终队伍（结算时掉线队友也按此判定胜方）
+        rosterCache.clear();
+        rosterCache.putAll(teams);
 
         resetScores();
         endedAt = 0L;
@@ -767,8 +1038,9 @@ public final class GameRoom {
             if (charId != null) {
                 plugin.giveCharacterWeapons(player, charId);
             }
-            Location spawn = arena.spawn(entry.getValue());
-            if (spawn != null) {
+            ArenaDef.Point spawnPoint = arena.spawn(entry.getValue());
+            if (spawnPoint != null) {
+                Location spawn = spawnPoint.toLocation(world());
                 player.teleport(spawn);
                 spawns.add(spawn);
             }
@@ -776,8 +1048,9 @@ public final class GameRoom {
             applySpawnBuff(player);
         }
 
-        // 对局区域四周立屏障墙（从世界最低点到最高点），防外人闯入、防玩家跑出
-        barrier.build();
+        // 对局区域四周立屏障墙（从世界最低点到最高点）—— v1.2.0 动态房间制下每房独占世界，
+        // 世界本身就是隔离边界，屏障墙停用（BarrierBuilder 保留，需要时恢复这一行即可）
+        // barrier.build();
 
         // CAGED：出生点玻璃笼内无敌冻结 hold 秒，到时笼解除再正式开战；hold=0 或建笼失败则直接开战
         int hold = Math.max(0, plugin.config().waitingCageHoldSeconds());
@@ -883,19 +1156,32 @@ public final class GameRoom {
     // ---------------------------------------------------------------- 背包备份与返还
 
     /**
-     * 把玩家当前背包（储物格 + 护甲 + 副手）整体备份后清空。
-     * 备份按 UUID 存，{@link #restoreInventory} 在结算时返还。
+     * 把玩家当前状态整体封存后清空——<b>进房即封存</b>，等待区人人平等。
+     * 封存粒度对齐 BedWars2020 的 PlayerGoods：背包三件套 + 血量/饥饿/经验/药水/游戏模式/飞行。
+     * 带防重入保护：已有快照时只清背包、绝不覆盖（否则真实物品会被对局装备顶掉），
+     * 换房、开局等场景重复调用都是安全的。快照按 UUID 存，结算/退房时 {@link #restoreInventoryIfAny} 返还。
      */
-    private void stashAndClearInventory(Player player) {
+    public void stashAndClearInventory(Player player) {
         if (player == null) {
             return;
         }
         UUID uuid = player.getUniqueId();
         var inv = player.getInventory();
-        backupContents.put(uuid, inv.getStorageContents().clone());
-        backupArmor.put(uuid, inv.getArmorContents().clone());
-        backupOffhand.put(uuid, inv.getItemInOffHand().clone());
+        if (!backups.containsKey(uuid)) {
+            backups.put(uuid, new InventorySnapshot(
+                    inv.getStorageContents().clone(),
+                    inv.getArmorContents().clone(),
+                    inv.getItemInOffHand().clone(),
+                    player.getHealth(), player.getFoodLevel(),
+                    player.getLevel(), player.getExp(),
+                    player.getGameMode(), player.isFlying(),
+                    new ArrayList<>(player.getActivePotionEffects())));
+        }
         inv.clear();
+        for (PotionEffect effect : new ArrayList<>(player.getActivePotionEffects())) {
+            player.removePotionEffect(effect.getType());
+        }
+        player.setFlying(false);
     }
 
     /**
@@ -911,42 +1197,23 @@ public final class GameRoom {
     }
 
     /**
-     * 取出并移除该玩家的背包备份（玩家对局中掉线时由 RoomManager 转存到全局暂存，
-     * 等其重连后再返还，避免结算时因不在线而丢失原物品）。没有备份返回 null。
+     * 取出并移除该玩家的状态快照（玩家对局中掉线时由 RoomManager 转存到全局暂存，
+     * 等其重连后再返还，避免结算时因不在线而丢失原状态）。没有快照返回 null。
      */
-    public org.bukkit.inventory.ItemStack[][] extractBackup(UUID uuid) {
-        org.bukkit.inventory.ItemStack[] contents = backupContents.remove(uuid);
-        org.bukkit.inventory.ItemStack[] armor = backupArmor.remove(uuid);
-        org.bukkit.inventory.ItemStack offhand = backupOffhand.remove(uuid);
-        if (contents == null && armor == null && offhand == null) {
-            return null;
-        }
-        return new org.bukkit.inventory.ItemStack[][]{contents, armor, offhand == null ? null : new org.bukkit.inventory.ItemStack[]{offhand}};
+    public InventorySnapshot extractBackup(UUID uuid) {
+        return backups.remove(uuid);
     }
 
-    /** 若该玩家在本房间有背包备份，清掉当前背包并写回备份（重连兜底/结算通用）。 */
+    /** 若该玩家在本房间有状态快照，清掉当前状态并原样写回（重连兜底/结算/退房通用）。 */
     public void restoreInventoryIfAny(Player player) {
         if (player == null) {
             return;
         }
-        UUID uuid = player.getUniqueId();
-        org.bukkit.inventory.ItemStack[] contents = backupContents.remove(uuid);
-        org.bukkit.inventory.ItemStack[] armor = backupArmor.remove(uuid);
-        org.bukkit.inventory.ItemStack offhand = backupOffhand.remove(uuid);
-        if (contents == null && armor == null && offhand == null) {
+        InventorySnapshot snapshot = backups.remove(player.getUniqueId());
+        if (snapshot == null) {
             return;
         }
-        var inv = player.getInventory();
-        inv.clear();
-        if (contents != null) {
-            inv.setStorageContents(contents);
-        }
-        if (armor != null) {
-            inv.setArmorContents(armor);
-        }
-        if (offhand != null) {
-            inv.setItemInOffHand(offhand);
-        }
+        snapshot.restoreTo(player);
     }
 
     /** 进入 PLAYING：计时起算、启动房间组件、开局播报。 */
@@ -1012,10 +1279,23 @@ public final class GameRoom {
      * ENDING 提前收房（观战提醒由 RoomManager 统一处理）。
      */
     public void tick() {
+        // 每秒清扫过期战斗状态（月人消失后残留的 mark 等），防止状态表无限增长
+        plugin.states().sweepExpired();
         switch (phase) {
             case WAITING -> {
                 if (waitingCount() >= effectiveMinPlayers()) {
                     enterStarting();
+                } else if (onlineParticipantCount() == 0) {
+                    // 房主与等待者全部离线：宽限期后解散空房，回收世界
+                    if (emptySinceMillis == 0L) {
+                        emptySinceMillis = System.currentTimeMillis();
+                    } else if (System.currentTimeMillis() - emptySinceMillis
+                            >= plugin.config().roomEmptyDisposeSeconds() * 1000L) {
+                        emptySinceMillis = 0L;
+                        manager.destroyRoom(this, false);
+                    }
+                } else {
+                    emptySinceMillis = 0L;
                 }
             }
             case STARTING -> tickStarting();
@@ -1029,6 +1309,31 @@ public final class GameRoom {
                 if (onlineParticipantCount() == 0) {
                     abortEmpty();
                     return;
+                }
+                // 掉线缓冲（借鉴 BedWars2020 的 rejoin-time）：缺人宽限期内等补位，
+                // 超时仍无人补位 → 缺人队判负，不再让剩余玩家打着注定失衡的垃圾局
+                if (!isPve()) {
+                    TeamId shortTeam = reinforcementTeam();
+                    if (shortTeam == null) {
+                        understaffedSinceMillis = 0L;
+                    } else {
+                        int grace = plugin.config().roomUnderstaffedGraceSeconds();
+                        if (understaffedSinceMillis == 0L) {
+                            understaffedSinceMillis = System.currentTimeMillis();
+                            if (grace > 0) {
+                                broadcast("<yellow>" + shortTeam.display() + " 缺人！<white>" + grace
+                                        + "</white> 秒内无人补位将判负（大厅快速加入即可补位）。");
+                            }
+                        } else if (grace > 0
+                                && System.currentTimeMillis() - understaffedSinceMillis >= grace * 1000L) {
+                            understaffedSinceMillis = 0L;
+                            broadcast("<red>" + shortTeam.display() + " 超时无人补位，判负！");
+                            finish(shortTeam == TeamId.RED ? TeamId.BLUE : TeamId.RED);
+                            return;
+                        }
+                    }
+                } else {
+                    understaffedSinceMillis = 0L;
                 }
                 if (remainingMillis() <= 0L) {
                     int redScore = teamScore(TeamId.RED);
@@ -1060,14 +1365,18 @@ public final class GameRoom {
         countdownStart = System.currentTimeMillis();
         long normalMillis = Math.max(1L, plugin.config().waitingCountdownSeconds()) * 1000L;
         countdownFullMillis = (long) plugin.config().waitingFullCountdownSeconds() * 1000L;
+        long halfMillis = plugin.config().waitingHalfCountdownSeconds() * 1000L;
         boolean alreadyFull = waitingCount() >= maxPlayers();
+        boolean alreadyHalf = !alreadyFull && halfMillis > 0L && waitingCount() > maxPlayers() / 2;
         countdownFull = alreadyFull;
-        countdownMillis = alreadyFull ? Math.min(normalMillis, countdownFullMillis) : normalMillis;
+        countdownHalf = alreadyHalf;
+        countdownMillis = alreadyFull ? Math.min(normalMillis, countdownFullMillis)
+                : (alreadyHalf ? Math.min(normalMillis, halfMillis) : normalMillis);
         long seconds = (countdownMillis + 999L) / 1000L;
         broadcastMessage(alreadyFull ? "room.countdown-full" : "room.countdown", "seconds", seconds);
         if (plugin.config().debug()) {
             plugin.getLogger().info("[room " + id() + "] 倒计时开始：" + seconds
-                    + "s（" + (alreadyFull ? "满员短倒计时" : "常规倒计时") + "，"
+                    + "s（" + (alreadyFull ? "满员短倒计时" : alreadyHalf ? "过半倒计时" : "常规倒计时") + "，"
                     + waitingCount() + "/" + maxPlayers() + "）");
         }
     }
@@ -1087,10 +1396,20 @@ public final class GameRoom {
         // 满员：一次性切到短倒计时（不大于当前剩余；full=0 时下一秒立即开局）
         if (!countdownFull && online >= maxPlayers()) {
             countdownFull = true;
+            countdownHalf = true;
             countdownStart = System.currentTimeMillis();
             countdownMillis = Math.min(Math.max(0L, remaining), countdownFullMillis);
             remaining = countdownMillis;
             broadcastMessage("room.countdown-full", "seconds", (countdownMillis + 999L) / 1000L);
+        }
+        // 过半压缩（半挡）：人数超过半场（3v3 的第 4 人起）一次性压到半挡倒计时
+        long halfMillis = plugin.config().waitingHalfCountdownSeconds() * 1000L;
+        if (!countdownFull && !countdownHalf && halfMillis > 0L && online > maxPlayers() / 2) {
+            countdownHalf = true;
+            countdownStart = System.currentTimeMillis();
+            countdownMillis = Math.min(Math.max(0L, remaining), halfMillis);
+            remaining = countdownMillis;
+            broadcastMessage("room.countdown", "seconds", (countdownMillis + 999L) / 1000L);
         }
 
         long seconds = Math.max(0L, (remaining + 999L) / 1000L);
@@ -1107,6 +1426,7 @@ public final class GameRoom {
                 phase = Phase.WAITING;
                 countdownMillis = 0L;
                 countdownFull = false;
+                countdownHalf = false;
                 broadcast("<red>自动开局失败：<gray>" + error);
             }
         }
@@ -1115,9 +1435,10 @@ public final class GameRoom {
     /** 管理员在倒计时阶段取消：回到 WAITING 并说明原因。 */
     private void cancelStarting(String reason) {
         phase = Phase.WAITING;
-        countdownMillis = 0L;
-        countdownFull = false;
-        broadcast("<yellow>开局倒计时已取消：<gray>" + reason);
+            countdownMillis = 0L;
+            countdownFull = false;
+            countdownHalf = false;
+            broadcast("<yellow>开局倒计时已取消：<gray>" + reason);
     }
 
     /** CAGED/PLAYING 全员离线：不写战绩、不播报胜负，直接停组件收房。 */
@@ -1346,8 +1667,9 @@ public final class GameRoom {
         if (recordStats) {
             plugin.stats().recordMatch(winnerTeam, teamScores, playerScores, playerNames);
             if (winnerTeam != null) {
+                // 结算名单走整局成员缓存（rosterCache）：掉线的队友同样记为胜方
                 List<String> winners = new ArrayList<>();
-                for (Map.Entry<UUID, TeamId> entry : teams.entrySet()) {
+                for (Map.Entry<UUID, TeamId> entry : rosterCache.entrySet()) {
                     if (entry.getValue() == winnerTeam) {
                         winners.add(nameOf(entry.getKey()));
                     }
@@ -1402,18 +1724,21 @@ public final class GameRoom {
             board.hide(Bukkit.getPlayer(uuid));
         }
 
-        // 人已回大厅：解除玩家→本房间映射，等待区/队伍名单全部清空，房间可再匹配
+        // 人已回大厅：解除玩家→本房间映射，清空名单与比分，然后销毁房间并回收世界
+        // （月之都制：房间是一次性的——结算完成、玩家回到大厅即整场删除）
         manager.detachRoom(this);
         waiting.clear();
         clearTeams();
         resetScores();
         countdownMillis = 0L;
         countdownFull = false;
+        countdownHalf = false;
         phase = Phase.WAITING;
         board.updateAll();
         if (plugin.config().debug()) {
-            plugin.getLogger().info("[room " + id() + "] 收尾完成，回到 WAITING 可再匹配");
+            plugin.getLogger().info("[room " + id() + "] 结算收尾完成，房间即将销毁并回收世界");
         }
+        manager.destroyRoom(this, false);
     }
 
     /**
@@ -1432,9 +1757,19 @@ public final class GameRoom {
         cage.restore();
         barrier.restore();
         stopComponents();
-        // 插件卸载/重载时，在线参赛者也得拿回自己的背包
-        for (UUID uuid : teams.keySet()) {
-            restoreInventory(uuid);
+        // 插件卸载/重载时：在线参与者（含等待区玩家）拿回自己的状态；离线者的快照转全局暂存等重连返还
+        Set<UUID> holders = new LinkedHashSet<>(teams.keySet());
+        holders.addAll(backups.keySet());
+        for (UUID uuid : holders) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null && player.isOnline()) {
+                restoreInventoryIfAny(player);
+            } else {
+                InventorySnapshot backup = extractBackup(uuid);
+                if (backup != null) {
+                    manager.stashOfflineBackup(uuid, backup);
+                }
+            }
         }
         board.clearAll();
     }
@@ -1492,9 +1827,9 @@ public final class GameRoom {
     public Set<String> roomWorlds() {
         Set<String> worlds = new LinkedHashSet<>();
         for (TeamId team : TeamId.values()) {
-            Location spawn = arena.spawn(team);
-            if (spawn != null && spawn.getWorld() != null) {
-                worlds.add(spawn.getWorld().getName());
+            ArenaDef.Point spawn = arena.spawn(team);
+            if (spawn != null) {
+                worlds.add(spawn.worldName());
             }
             for (CuboidRegion region : arena.bases(team).values()) {
                 if (region != null && region.worldName() != null) {
@@ -1507,13 +1842,17 @@ public final class GameRoom {
                 worlds.add(region.worldName());
             }
         }
-        Location outpostSpot = arena.outpost();
-        if (outpostSpot != null && outpostSpot.getWorld() != null) {
-            worlds.add(outpostSpot.getWorld().getName());
+        ArenaDef.Point outpostSpot = arena.outpost();
+        if (outpostSpot != null) {
+            worlds.add(outpostSpot.worldName());
         }
-        Location wait = arena.waitSpawn();
-        if (wait != null && wait.getWorld() != null) {
-            worlds.add(wait.getWorld().getName());
+        if (arena.waitRegion() != null) {
+            worlds.add(arena.waitRegion().worldName());
+        } else {
+            ArenaDef.Point wait = arena.waitSpawn();
+            if (wait != null) {
+                worlds.add(wait.worldName());
+            }
         }
         return worlds;
     }
