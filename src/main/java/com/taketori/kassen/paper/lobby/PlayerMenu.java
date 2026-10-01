@@ -158,7 +158,7 @@ public final class PlayerMenu implements Listener {
             inventory.setItem(14, button(Material.NETHER_STAR, "<white>角色选择",
                     "<gray>当前角色：<white>" + character,
                     "<yellow>点击打开角色菜单",
-                    "<dark_gray>选完立即绑定并发放武器"));
+                    "<dark_gray>选完即绑定，装备开局发放"));
         } else {
             inventory.setItem(14, button(Material.GRAY_DYE, "<dark_gray>角色选择",
                     "<red>游戏外不可选择角色",

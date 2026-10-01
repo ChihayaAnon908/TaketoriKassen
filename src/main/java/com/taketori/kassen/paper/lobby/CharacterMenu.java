@@ -65,7 +65,7 @@ public final class CharacterMenu implements Listener {
 
     /**
      * 普通打开入口：游戏外（不在等待区）直接拒绝并解释。
-     * 角色与对局绑定——大厅选好武器带进等待区会被进房封存逻辑清空，没有意义。
+     * 角色与对局绑定——在等待区选好即可，武器与开局铁甲由开局流程统一发放。
      */
     public void open(Player player) {
         if (!inWaitingRoom(player)) {
@@ -225,7 +225,7 @@ public final class CharacterMenu implements Listener {
         // 已成功绑定：解除角色强制，关闭事件不再重开角色菜单
         forced.remove(player.getUniqueId());
         player.sendMessage(MINI.deserialize("<green>已选择角色 " + character.display()
-                + "<gray>，武器已发放到快捷栏。"));
+                + "<gray>，开局时会连同铁甲一起发放。"));
         if (decision.displacedSomeone()) {
             player.sendMessage(MINI.deserialize("<yellow>你的权重更高，已接管该角色（"
                     + decision.displaced() + " 的角色被解除）。"));

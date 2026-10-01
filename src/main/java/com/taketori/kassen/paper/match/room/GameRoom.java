@@ -272,6 +272,16 @@ public final class GameRoom {
         return phase == Phase.PLAYING;
     }
 
+    /**
+     * 对局是否已经开始（玻璃笼准备 + 正式战斗）。
+     *
+     * <p>比 {@link #isRunning()} 多算 CAGED：这两个阶段玩家都应当持有角色装备，所以在玻璃笼里
+     * 换角色必须立刻换装——否则角色切了、旧武器被清掉、新武器又不发，开局就是整局空手。</p>
+     */
+    public boolean isMatchInProgress() {
+        return phase == Phase.CAGED || phase == Phase.PLAYING;
+    }
+
     // ---------------------------------------------------------------- 规则与模式
 
     /**

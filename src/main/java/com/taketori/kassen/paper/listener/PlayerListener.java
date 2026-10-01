@@ -39,8 +39,10 @@ public final class PlayerListener implements Listener {
         if (plugin.rejoin().tryRejoin(player)) {
             return;
         }
+        // 进服补装备：只有「上线时正好在一局进行中的对局里」才发（正常进服已由重连分支或
+        // 开局流程负责）。大厅与等待区只记角色，武器留到开局统一发。
         if (characterId != null && plugin.config().characters().has(characterId)
-                && plugin.config().autoGiveOnJoin()) {
+                && plugin.config().autoGiveOnJoin() && plugin.inRunningMatch(player)) {
             plugin.scheduler().runLater(() -> plugin.giveCharacterWeapons(player, characterId), 20L);
         }
         // 进服送到大厅：只在"接管白名单"内的世界才做。

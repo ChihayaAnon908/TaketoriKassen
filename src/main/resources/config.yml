@@ -61,7 +61,8 @@ tags:
 items:
   # 武器物品是否绑定所有者（防止交易 / 掉落转手）
   soulbound: true
-  # 玩家进服时是否自动补发其角色武器
+  # 玩家进服时，若正处于一局已开打（玻璃笼/战斗中）的对局里，是否自动补发其角色武器。
+  # 大厅与等待区不发装备——选角色只记选择，武器与铁甲由开局统一发放。
   auto-give-on-join: false
   # 是否允许武器被丢出（Q 键拦截在此之上）
   allow-drop: false
@@ -219,9 +220,9 @@ combat:
     amplifier: 4       # 4 = V 级（0 = I 级）
     ticks: 40          # 40 tick = 2 秒
 
-# 开局装备：绑定角色 / 补发武器时自动穿上的一套护甲。
+# 开局装备：开局时与角色武器一起发的一套护甲（放进背包，不替换你身上穿的）。
 # 目的：把所有人的"底子"拉平，避免有人裸装进场被一发带走。
-# 只覆盖护甲的四个槽位，不动背包与手上的武器。
+# 大厅与等待区选角色不发装备，避免玩家还没开打就拿着对局装备。
 loadout:
   armor-enabled: true     # 关掉就完全不发护甲
   armor-material: IRON    # 套装材质：IRON / CHAINMAIL / GOLDEN / LEATHER / DIAMOND / NETHERITE

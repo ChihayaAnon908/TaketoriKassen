@@ -236,7 +236,7 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
         ItemStack hand = player.getInventory().getItemInMainHand();
         var identity = plugin.items().read(hand);
         if (identity == null) {
-            sender.sendMessage(MINI.deserialize("<red>主手不是插件武器（先用 /taketori character 或 /taketori give 领取）。"));
+            sender.sendMessage(MINI.deserialize("<red>主手不是插件武器（角色装备由开局发放；管理可用 /taketori give 直接发放）。"));
             return;
         }
         var weapon = plugin.config().weapons().get(identity.weaponId());

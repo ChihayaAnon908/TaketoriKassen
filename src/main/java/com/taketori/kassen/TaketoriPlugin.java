@@ -347,7 +347,8 @@ public final class TaketoriPlugin extends JavaPlugin {
             ItemStack hand = player.getInventory().getItemInMainHand();
             var identity = items.read(hand);
             lines.add("主手: " + hand.getType() + " / 是否插件武器: "
-                    + (identity != null ? "是" : "否（用 /taketori character 或 /taketori give 领取）"));
+                    + (identity != null ? "是"
+                    : "否（角色装备由开局发放；管理可用 /taketori character 指定角色）"));
             if (identity != null) {
                 lines.add("PDC: weapon_id=" + identity.weaponId() + " character_id=" + identity.characterId()
                         + " mode=" + identity.mode() + " soulbound=" + identity.soulbound());
@@ -507,11 +508,32 @@ public final class TaketoriPlugin extends JavaPlugin {
             String characterId = dataStore.characterIdOf(player.getUniqueId());
             if (characterId != null && config.characters().has(characterId)) {
                 config.characters().bind(player.getUniqueId(), characterId);
-                if (config.autoGiveOnJoin()) {
+                // 重载会停掉所有对局，所以这里正常轮不到发装备；仍保留「对不对局中」的判断，
+                // 与 bindCharacter 用同一条规则，避免以后有人把重载流程改成保留对局时漏掉。
+                if (config.autoGiveOnJoin() && inRunningMatch(player)) {
                     giveCharacterWeapons(player, characterId);
                 }
             }
         }
+    }
+
+    /**
+     * 该玩家是否正在一局<b>已经开打</b>（玻璃笼准备 / 战斗中）的对局里。
+     *
+     * <p>角色装备（武器 + 开局铁甲）只在这种情况下发放。大厅与等待区选角色只记选择——
+     * 否则玩家还没开打就拿着对局武器，装备还会被「进房即封存」存进背包快照，结算时又还给他。
+     * 玻璃笼阶段（CAGED）必须算进来：那几秒里换角色若不补发，开局就是整局空手。</p>
+     */
+    public boolean inRunningMatch(Player player) {
+        if (player == null) {
+            return false;
+        }
+        RoomManager manager = rooms();
+        if (manager == null) {
+            return false;
+        }
+        var room = manager.roomOf(player);
+        return room != null && room.isMatchInProgress();
     }
 
     public void bindCharacter(Player player, String characterId) {
@@ -526,7 +548,16 @@ public final class TaketoriPlugin extends JavaPlugin {
         clearCharacterWeapons(player);
         config.characters().bind(player.getUniqueId(), characterId);
         dataStore.setCharacterId(player.getUniqueId(), characterId);
-        giveCharacterWeapons(player, characterId);
+        if (inRunningMatch(player)) {
+            // 对局进行中换角色：必须立刻换装，否则手上还留着旧角色的武器
+            giveCharacterWeapons(player, characterId);
+        } else {
+            // 大厅 / 等待区：只应用角色属性（血量上限、移速），武器与开局铁甲留到开局统一发
+            var character = config.characters().get(characterId);
+            if (character != null) {
+                applyCharacterAttributes(player, character);
+            }
+        }
     }
 
     /**
@@ -599,7 +630,7 @@ public final class TaketoriPlugin extends JavaPlugin {
         if (!leftover.isEmpty()) {
             player.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage()
                     .deserialize("<yellow>背包已满，有 " + leftover.size()
-                            + " 件开局护甲没能发放<gray>（清出空位后重新选一次角色即可）"));
+                            + " 件开局护甲没能发放<gray>（清出空位后可由管理员重新指定角色补发）"));
         }
     }
 
@@ -647,6 +678,11 @@ public final class TaketoriPlugin extends JavaPlugin {
             AttributeInstance instance = player.getAttribute(health);
             if (instance != null) {
                 instance.setBaseValue(character.attribute("max-health", 20.0D));
+                // 上限被调低时把当前血量一并夹下来：否则大厅里会出现 20/18 这种不一致读数
+                // （原版下一 tick 也会夹，但玩家选完角色当场就看到了错的值）
+                if (player.getHealth() > instance.getValue()) {
+                    player.setHealth(instance.getValue());
+                }
             }
         }
         Attribute speed = versions.attribute("movement_speed");
