@@ -37,7 +37,9 @@ public final class WeaponYamlCheck {
     private static final Set<String> SKILL_TYPES = Set.of(
             "melee_smash", "projectile", "shockwave", "rocket_jump", "pull", "reflect",
             "self_boost", "blink", "grapple", "special_shot_toggle", "shield_guard",
-            "mirror_skill", "mirror_burst", "mode_switch", "equip_switch");
+            "mirror_skill", "mirror_burst", "mode_switch", "equip_switch",
+            // 2.0 版新增：易伤施加 / 破甲 / 兑现 / 场地 / 召唤
+            "mark_apply", "armor_break", "echo_consume", "deploy_zone", "summon_ally");
 
     private static final Set<String> SLOTS = Set.of("left", "right", "shift-right", "q");
 

@@ -39,9 +39,13 @@ import com.taketori.kassen.paper.match.StatsTracker;
 import com.taketori.kassen.paper.scheduler.SchedulerAdapter;
 import com.taketori.kassen.paper.skill.SkillManager;
 import com.taketori.kassen.paper.skill.SkillRegistry;
+import com.taketori.kassen.paper.skill.impl.ArmorBreakSkill;
 import com.taketori.kassen.paper.skill.impl.BlinkSkill;
 import com.taketori.kassen.paper.skill.impl.EquipSwitchSkill;
+import com.taketori.kassen.paper.skill.impl.DeployZoneSkill;
+import com.taketori.kassen.paper.skill.impl.EchoConsumeSkill;
 import com.taketori.kassen.paper.skill.impl.GrappleSkill;
+import com.taketori.kassen.paper.skill.impl.MarkApplySkill;
 import com.taketori.kassen.paper.skill.impl.MeleeSmashSkill;
 import com.taketori.kassen.paper.skill.impl.MirrorBurstSkill;
 import com.taketori.kassen.paper.skill.impl.MirrorSkill;
@@ -54,6 +58,7 @@ import com.taketori.kassen.paper.skill.impl.ShockwaveSkill;
 import com.taketori.kassen.paper.skill.impl.SelfBoostSkill;
 import com.taketori.kassen.paper.skill.impl.ShieldGuardSkill;
 import com.taketori.kassen.paper.skill.impl.SpecialShotToggleSkill;
+import com.taketori.kassen.paper.skill.impl.SummonAllySkill;
 import com.taketori.kassen.paper.state.CombatStates;
 import com.taketori.kassen.version.DefaultVersionAdapter;
 import com.taketori.kassen.version.VersionAdapter;
@@ -476,6 +481,12 @@ public final class TaketoriPlugin extends JavaPlugin {
         registry.register(new RocketJumpSkill(this));
         registry.register(new PullSkill(this));
         registry.register(new ReflectSkill(this));
+        // ---- 2.0 版新增的五个类型：易伤施加 / 破甲 / 兑现 / 场地 / 召唤 ----
+        registry.register(new MarkApplySkill(this));
+        registry.register(new ArmorBreakSkill(this));
+        registry.register(new EchoConsumeSkill(this));
+        registry.register(new DeployZoneSkill(this));
+        registry.register(new SummonAllySkill(this));
     }
 
     /** 重载配置：失败时保留上一份可用配置，避免把服务器改坏。 */

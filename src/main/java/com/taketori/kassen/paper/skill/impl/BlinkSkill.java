@@ -4,12 +4,18 @@ import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.paper.skill.Skill;
 import com.taketori.kassen.paper.skill.SkillContext;
 import com.taketori.kassen.paper.skill.SkillResult;
+import com.taketori.kassen.paper.skill.SkillTargets;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
+
+import java.util.List;
 
 /**
  * 快速位移：彩叶钢丝装备的 Shift+右键。
@@ -81,6 +87,8 @@ public final class BlinkSkill implements Skill {
         plugin.fx().particle(context.str("particle", "END_ROD"), destination, 20, 0.3D);
         plugin.fx().particle("CLOUD", destination, 8, 0.25D);   // 落点扬尘（B7 到站反馈）
         plugin.fx().sound(context.str("sound", "ENTITY_ENDERMAN_TELEPORT"), destination, 0.8F, 1.2F);
+        // 2.0：落点余威（reserve-*）——寒冰滑步留下冰环、影步落地有伤害
+        applyReserve(context, player, destination);
         if (plugin.config().debug()) {
             plugin.getLogger().info(String.format("[combat] blink 瞬移到 %.1f %.1f %.1f",
                     destination.getX(), destination.getY(), destination.getZ()));
@@ -111,5 +119,35 @@ public final class BlinkSkill implements Skill {
         Block feet = world.getBlockAt(location.getBlockX(), location.getBlockY(), location.getBlockZ());
         Block head = world.getBlockAt(location.getBlockX(), location.getBlockY() + 1, location.getBlockZ());
         return feet.isPassable() && head.isPassable() && feet.getType() != Material.LAVA;
+    }
+
+    /**
+     * 落点余威：传送完成后对落点半径内的敌人结算伤害与减速。
+     *
+     * <p>{@code reserve-damage} 与 {@code reserve-slow-duration} 都为 0 时整个跳过——
+     * 老配置（只写 distance 的纯位移）行为不变。</p>
+     */
+    private void applyReserve(SkillContext context, Player player, Location destination) {
+        double damage = context.dbl("reserve-damage", 0.0D);
+        int slowDuration = context.integer("reserve-slow-duration", 0);
+        if (damage <= 0.0D && slowDuration <= 0) {
+            return;
+        }
+        double radius = Math.max(0.5D, context.dbl("reserve-radius", 2.5D));
+        List<LivingEntity> targets = SkillTargets.enemiesInRadius(plugin, player, destination, radius);
+        for (LivingEntity target : targets) {
+            if (damage > 0.0D) {
+                target.damage(damage, player);
+                plugin.damageNumbers().hit(player, target, damage);
+            }
+            if (slowDuration > 0) {
+                PotionEffectType slow = plugin.versions().potionEffect("SLOWNESS");
+                if (slow != null) {
+                    target.addPotionEffect(new PotionEffect(slow, slowDuration,
+                            Math.max(0, context.integer("reserve-slow-amplifier", 0)), false, true, true));
+                }
+            }
+        }
+        plugin.fx().particle(context.str("reserve-particle", "CLOUD"), destination, 20, radius * 0.4D);
     }
 }

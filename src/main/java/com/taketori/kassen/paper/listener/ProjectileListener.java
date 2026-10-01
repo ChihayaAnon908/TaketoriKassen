@@ -1,6 +1,7 @@
 package com.taketori.kassen.paper.listener;
 
 import com.taketori.kassen.TaketoriPlugin;
+import com.taketori.kassen.paper.skill.SkillTargets;
 import com.taketori.kassen.paper.skill.impl.ProjectileSkill;
 import com.taketori.kassen.paper.state.CombatStates;
 import org.bukkit.Location;
@@ -90,9 +91,24 @@ public final class ProjectileListener implements Listener {
                 // 距离衰减：从中心满伤线性衰减到 min-falloff（默认 50%）
                 double ratio = Math.min(1.0D, distance / (radius + 0.5D));
                 double falloff = 1.0D - (1.0D - minFalloff) * ratio;
-                applyDamage(living, damage * falloff, shooter);
+                // 兑现：目标带标记 / 破甲 / 减速 / 冻结时放大（echo-bonus ≤ 1.0 = 关闭）
+                double echoBonus = skill.echoBonusOf(projectile);
+                double echoMultiplier = echoBonus > 1.0D
+                        && SkillTargets.hasConsumableState(plugin, living) ? echoBonus : 1.0D;
+                double applied = damage * falloff * echoMultiplier;
+                applyDamage(living, applied, shooter);
                 if (shooter instanceof Player owner) {
-                    plugin.damageNumbers().hit(owner, living, damage * falloff);   // 伤害数字（A1）
+                    plugin.damageNumbers().hit(owner, living, applied);   // 伤害数字（A1）
+                }
+                // 命中施加状态：放在伤害结算之后，避免"这一发自己吃自己刚挂上的标记"
+                double markBonus = skill.markBonusOf(projectile);
+                if (markBonus > 0.0D) {
+                    plugin.states().mark(living.getUniqueId(), skill.markTicksOf(projectile), markBonus);
+                }
+                double armorPierce = skill.armorPierceOf(projectile);
+                if (armorPierce > 0.0D) {
+                    plugin.states().armorBreak(living.getUniqueId(), skill.markTicksOf(projectile),
+                            armorPierce, 1);
                 }
                 if (ignite && igniteTicks > 0) {
                     living.setFireTicks(Math.max(living.getFireTicks(), igniteTicks));

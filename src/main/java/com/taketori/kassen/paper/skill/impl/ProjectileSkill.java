@@ -85,6 +85,11 @@ public final class ProjectileSkill implements Skill {
         pdc.set(PDCKeys.projHitParticle(), PersistentDataType.STRING, context.str("hit-particle", context.str("particle", "CRIT")));
         pdc.set(PDCKeys.projShooter(), PersistentDataType.STRING, player.getUniqueId().toString());
         pdc.set(PDCKeys.projFreezeTicks(), PersistentDataType.INTEGER, context.integer("freeze-ticks", 0));
+        // 2.0 新增：兑现倍率 + 命中施加的易伤 / 破甲（由 ProjectileListener 在命中时结算）
+        pdc.set(PDCKeys.projEchoBonus(), PersistentDataType.DOUBLE, context.dbl("echo-bonus", 1.0D));
+        pdc.set(PDCKeys.projMarkBonus(), PersistentDataType.DOUBLE, context.dbl("mark-bonus", 0.0D));
+        pdc.set(PDCKeys.projMarkTicks(), PersistentDataType.INTEGER, context.integer("mark-ticks", 80));
+        pdc.set(PDCKeys.projArmorPierce(), PersistentDataType.DOUBLE, context.dbl("armor-pierce", 0.0D));
 
         plugin.fx().sound(context.str("sound", "ENTITY_SNOWBALL_THROW"), player, 0.8F, 1.0F);
         plugin.fx().particle(context.str("particle", "CRIT"), spawn, 5, 0.12D);
@@ -213,6 +218,30 @@ public final class ProjectileSkill implements Skill {
     public int freezeTicksOf(Projectile projectile) {
         Integer value = projectile.getPersistentDataContainer().get(PDCKeys.projFreezeTicks(), PersistentDataType.INTEGER);
         return value == null ? 0 : value;
+    }
+
+    /** 兑现倍率（1.0 = 不兑现；目标带标记/破甲/减速/冻结时由监听器放大）。 */
+    public double echoBonusOf(Projectile projectile) {
+        Double value = projectile.getPersistentDataContainer().get(PDCKeys.projEchoBonus(), PersistentDataType.DOUBLE);
+        return value == null ? 1.0D : value;
+    }
+
+    /** 命中时给目标挂的易伤标记强度（0 = 不挂）。 */
+    public double markBonusOf(Projectile projectile) {
+        Double value = projectile.getPersistentDataContainer().get(PDCKeys.projMarkBonus(), PersistentDataType.DOUBLE);
+        return value == null ? 0.0D : value;
+    }
+
+    /** 命中时挂的易伤标记时长（tick）。 */
+    public int markTicksOf(Projectile projectile) {
+        Integer value = projectile.getPersistentDataContainer().get(PDCKeys.projMarkTicks(), PersistentDataType.INTEGER);
+        return value == null ? 80 : value;
+    }
+
+    /** 命中时给目标挂的破甲强度（0 = 不挂）。 */
+    public double armorPierceOf(Projectile projectile) {
+        Double value = projectile.getPersistentDataContainer().get(PDCKeys.projArmorPierce(), PersistentDataType.DOUBLE);
+        return value == null ? 0.0D : value;
     }
 
     public String hitSoundOf(Projectile projectile) {

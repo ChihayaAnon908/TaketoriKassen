@@ -46,6 +46,12 @@ public final class MatchListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMinionDeath(EntityDeathEvent event) {
         LivingEntity entity = event.getEntity();
+        // 召唤物不是月人：击杀它既不计分也不计击杀（否则对面可以刷狗刷分）
+        if (entity.getPersistentDataContainer()
+                .get(com.taketori.kassen.paper.item.PDCKeys.summonedOwner(),
+                        org.bukkit.persistence.PersistentDataType.STRING) != null) {
+            return;
+        }
         GameRoom room = plugin.rooms().roomOfEntity(entity);
         if (room == null) {
             return;

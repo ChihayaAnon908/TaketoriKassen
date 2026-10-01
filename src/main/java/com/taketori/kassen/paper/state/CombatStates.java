@@ -43,6 +43,22 @@ public final class CombatStates {
         }
     }
 
+    /**
+     * 破甲：受到的伤害按 {@code pierce} 提升（硬上限 {@link #MAX_ARMOR_PIERCE}）。
+     *
+     * <p>刻意<b>不复用 {@link Mark}</b>：两者必须能共存——队友挂的易伤与自己的破甲是两段独立
+     * 乘区，共用一张表会互相顶掉。</p>
+     */
+    public record ArmorBreak(long untilMillis, double pierce, int stacks) {
+
+        public boolean expired() {
+            return System.currentTimeMillis() >= untilMillis;
+        }
+    }
+
+    /** 破甲提升的硬上限：再多也只当 30%，避免"破满甲一刀半血"。 */
+    public static final double MAX_ARMOR_PIERCE = 0.30D;
+
     private static final class ChainState {
         private String weaponId;
         private int stacks;
@@ -53,6 +69,7 @@ public final class CombatStates {
     private final Map<UUID, Long> fallImmunities = new ConcurrentHashMap<>();
     private final Map<UUID, Reflection> reflections = new ConcurrentHashMap<>();
     private final Map<UUID, Mark> marks = new ConcurrentHashMap<>();
+    private final Map<UUID, ArmorBreak> armorBreaks = new ConcurrentHashMap<>();
     private final Map<UUID, ChainState> chains = new ConcurrentHashMap<>();
 
     // ---------------------------------------------------------------- 防御窗口
@@ -159,6 +176,39 @@ public final class CombatStates {
         return mark.bonus();
     }
 
+    // ---------------------------------------------------------------- 破甲（帝 / 雷）
+
+    /** 挂破甲：{@code pierce} 会被夹到 [0, {@link #MAX_ARMOR_PIERCE}]。 */
+    public void armorBreak(UUID uuid, int ticks, double pierce, int stacks) {
+        if (uuid == null || ticks <= 0 || pierce <= 0.0D) {
+            return;
+        }
+        armorBreaks.put(uuid, new ArmorBreak(System.currentTimeMillis() + ticks * 50L,
+                Math.min(MAX_ARMOR_PIERCE, pierce), Math.max(1, stacks)));
+    }
+
+    /** 破甲状态（惰性过期清理）；没有或已过期返回 null。 */
+    public ArmorBreak armorBreak(UUID uuid) {
+        if (uuid == null) {
+            return null;
+        }
+        ArmorBreak state = armorBreaks.get(uuid);
+        if (state == null) {
+            return null;
+        }
+        if (state.expired()) {
+            armorBreaks.remove(uuid);
+            return null;
+        }
+        return state;
+    }
+
+    /** 破甲带来的伤害提升比例（0 = 没被破甲）。 */
+    public double armorPierce(UUID uuid) {
+        ArmorBreak state = armorBreak(uuid);
+        return state == null ? 0.0D : state.pierce();
+    }
+
     // ---------------------------------------------------------------- 连击层数（彩叶的剑）
 
     /**
@@ -202,6 +252,7 @@ public final class CombatStates {
         fallImmunities.remove(uuid);
         reflections.remove(uuid);
         marks.remove(uuid);
+        armorBreaks.remove(uuid);
         chains.remove(uuid);
     }
 
@@ -215,6 +266,7 @@ public final class CombatStates {
         defenses.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
         reflections.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
         marks.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
+        armorBreaks.entrySet().removeIf(entry -> now >= entry.getValue().untilMillis());
         fallImmunities.entrySet().removeIf(entry -> now >= entry.getValue());
         chains.entrySet().removeIf(entry -> now >= entry.getValue().expiresAt);
     }
@@ -224,10 +276,12 @@ public final class CombatStates {
         fallImmunities.clear();
         reflections.clear();
         marks.clear();
+        armorBreaks.clear();
         chains.clear();
     }
 
     public int size() {
-        return defenses.size() + fallImmunities.size() + reflections.size() + marks.size() + chains.size();
+        return defenses.size() + fallImmunities.size() + reflections.size() + marks.size()
+                + armorBreaks.size() + chains.size();
     }
 }

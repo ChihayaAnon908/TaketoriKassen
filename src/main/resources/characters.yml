@@ -12,12 +12,12 @@ characters:
 
   kaguya:
     display: '<gradient:#f5c26b:#f78fb3>辉夜</gradient>'
-    weapons: [ kaguya_hammer ]
+    weapons: [ kaguya_hammer, kaguya_bell ]
     attributes:
       max-health: 20.0
       movement-speed: 0.1
     lore:
-      - '<gray>月之公主，以火箭锤开路。'
+      - '<gray>月之公主，以火箭锤开路，以月铃庇佑同伴。'
 
   mikado:
     display: '<dark_purple>帝</dark_purple>'
@@ -30,12 +30,12 @@ characters:
 
   iroha:
     display: '<white>彩叶</white>'
-    weapons: [ iroha_sword, iroha_wire ]
+    weapons: [ iroha_sword, iroha_wire, iroha_kunai ]
     attributes:
       max-health: 20.0
       movement-speed: 0.11
     lore:
-      - '<gray>剑与钢丝并用，机动力最高。'
+      - '<gray>剑、钢丝与苦无并用，机动力最高。'
 
   noi:
     display: '<green>乃依</green>'
@@ -67,7 +67,7 @@ characters:
 
   takumi:
     display: '<gold>宅公</gold>'
-    weapons: [ takumi_fang, takumi_collar ]
+    weapons: [ takumi_fang, takumi_collar, takumi_iron_fang ]
     attributes:
       max-health: 24.0
       movement-speed: 0.098

@@ -49,6 +49,21 @@ public final class PDCKeys {
     private static NamespacedKey arrowDebuffAmplifier;
     private static NamespacedKey arrowDebuffChance;
 
+    /** 召唤物归属（UUID 字符串）：用于友伤拦截、同队判定与结算不计分。 */
+    private static NamespacedKey summonedOwner;
+    /** 召唤物到期时间（毫秒时间戳）：房间清理时也据此兜底移除。 */
+    private static NamespacedKey summonedExpire;
+    /** 场地技能归属（UUID 字符串）：玩家退出 / 房间销毁时按它清理名下的领域。 */
+    private static NamespacedKey zoneOwner;
+
+    /** 弹体的兑现倍率：命中时目标身上有前置状态则放大伤害。 */
+    private static NamespacedKey projEchoBonus;
+    /** 弹体命中时给目标挂的易伤标记强度 / 时长。 */
+    private static NamespacedKey projMarkBonus;
+    private static NamespacedKey projMarkTicks;
+    /** 弹体命中时给目标挂的破甲强度。 */
+    private static NamespacedKey projArmorPierce;
+
     private PDCKeys() {
     }
 
@@ -86,6 +101,15 @@ public final class PDCKeys {
         arrowDebuffTicks = new NamespacedKey(plugin, "arrow_debuff_ticks");
         arrowDebuffAmplifier = new NamespacedKey(plugin, "arrow_debuff_amplifier");
         arrowDebuffChance = new NamespacedKey(plugin, "arrow_debuff_chance");
+
+        summonedOwner = new NamespacedKey(plugin, "summoned_owner");
+        summonedExpire = new NamespacedKey(plugin, "summoned_expire");
+        zoneOwner = new NamespacedKey(plugin, "zone_owner");
+
+        projEchoBonus = new NamespacedKey(plugin, "proj_echo_bonus");
+        projMarkBonus = new NamespacedKey(plugin, "proj_mark_bonus");
+        projMarkTicks = new NamespacedKey(plugin, "proj_mark_ticks");
+        projArmorPierce = new NamespacedKey(plugin, "proj_armor_pierce");
     }
 
     public static NamespacedKey characterId() {
@@ -222,5 +246,40 @@ public final class PDCKeys {
     /** 触发概率（1.0 = 每箭必触发）。 */
     public static NamespacedKey arrowDebuffChance() {
         return arrowDebuffChance;
+    }
+
+    /** 召唤物归属（UUID 字符串）。 */
+    public static NamespacedKey summonedOwner() {
+        return summonedOwner;
+    }
+
+    /** 召唤物到期时间（毫秒时间戳）。 */
+    public static NamespacedKey summonedExpire() {
+        return summonedExpire;
+    }
+
+    /** 场地技能归属（UUID 字符串）。 */
+    public static NamespacedKey zoneOwner() {
+        return zoneOwner;
+    }
+
+    /** 弹体的兑现倍率（>1 时命中带前置状态的目标会放大伤害）。 */
+    public static NamespacedKey projEchoBonus() {
+        return projEchoBonus;
+    }
+
+    /** 弹体命中时施加的易伤标记强度。 */
+    public static NamespacedKey projMarkBonus() {
+        return projMarkBonus;
+    }
+
+    /** 弹体命中时施加的易伤标记时长（tick）。 */
+    public static NamespacedKey projMarkTicks() {
+        return projMarkTicks;
+    }
+
+    /** 弹体命中时施加的破甲强度。 */
+    public static NamespacedKey projArmorPierce() {
+        return projArmorPierce;
     }
 }

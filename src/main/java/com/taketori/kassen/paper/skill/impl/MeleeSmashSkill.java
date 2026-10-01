@@ -26,9 +26,9 @@ import java.util.List;
  * <p>技能伤害就是配置里的 {@code damage}；近战的原版伤害已在 CombatListener 里取消，
  * 所以不存在"原版 + 技能"双重结算。</p>
  */
-public final class MeleeSmashSkill implements Skill {
+public class MeleeSmashSkill implements Skill {
 
-    private final TaketoriPlugin plugin;
+    protected final TaketoriPlugin plugin;
 
     public MeleeSmashSkill(TaketoriPlugin plugin) {
         this.plugin = plugin;
@@ -105,8 +105,10 @@ public final class MeleeSmashSkill implements Skill {
         }
 
         for (LivingEntity target : targets) {
-            target.damage(damage, player);
-            plugin.damageNumbers().hit(player, target, damage);   // 伤害数字（A1）
+            // 子类钩子：兑现类技能（echo_consume）在这里按目标身上的前置状态放大伤害
+            double finalDamage = damage * bonusMultiplier(context, target);
+            target.damage(finalDamage, player);
+            plugin.damageNumbers().hit(player, target, finalDamage);   // 伤害数字（A1）
             if (knockback > 0.0D) {
                 Vector push = target.getLocation().toVector().subtract(player.getLocation().toVector());
                 push.setY(0.0D);
@@ -135,10 +137,21 @@ public final class MeleeSmashSkill implements Skill {
     }
 
     /**
+     * 伤害倍率钩子：{@code melee_smash} 本体恒为 1.0；{@link EchoConsumeSkill} 覆写它，
+     * 按目标身上的标记 / 破甲 / 减速 / 冰冻状态放大伤害。
+     *
+     * <p>放在这里而不是在 {@code execute} 里写 if，是为了让"兑现"这条线只多一个子类，
+     * 不改动近战本体已经被验证过的判定与手感。</p>
+     */
+    protected double bonusMultiplier(SkillContext context, LivingEntity target) {
+        return 1.0D;
+    }
+
+    /**
      * 对方是不是"受友伤保护的同队队友"：是则整个目标跳过——
      * 伤害事件会被友伤处理器取消，但击退 / 减速 / 定身等控制效果不会，必须在此拦截。
      */
-    private boolean isProtectedTeammate(Player caster, Player other) {
+    protected boolean isProtectedTeammate(Player caster, Player other) {
         var room = plugin.rooms().roomOf(caster);
         if (room == null || !room.isFriendlyFireProtected()) {
             return false;
@@ -151,7 +164,7 @@ public final class MeleeSmashSkill implements Skill {
         return casterTeam != null && casterTeam == otherTeam;
     }
 
-    private void applySlow(SkillContext context, LivingEntity target, int durationTicks) {
+    protected void applySlow(SkillContext context, LivingEntity target, int durationTicks) {
         VersionAdapter versions = plugin.versions();
         PotionEffectType type = versions.potionEffect(context.str("slow-type", "SLOWNESS"));
         if (type == null) {
@@ -162,7 +175,7 @@ public final class MeleeSmashSkill implements Skill {
     }
 
     /** 定身：缓慢拉满 + 负跳跃（纯原版药水效果，跨版本安全）。 */
-    private void applyFreeze(LivingEntity target, int ticks) {
+    protected void applyFreeze(LivingEntity target, int ticks) {
         PotionEffectType slow = plugin.versions().potionEffect("SLOWNESS");
         if (slow != null) {
             target.addPotionEffect(new PotionEffect(slow, ticks, 250, false, true, true));

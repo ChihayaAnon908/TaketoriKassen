@@ -7,8 +7,10 @@ import com.taketori.kassen.core.skill.SkillSlot;
 import com.taketori.kassen.core.weapon.WeaponDef;
 import com.taketori.kassen.paper.item.ItemFactory;
 import com.taketori.kassen.paper.item.PDCKeys;
+import com.taketori.kassen.paper.skill.SkillTargets;
 import com.taketori.kassen.paper.skill.impl.ProjectileSkill;
 import com.taketori.kassen.paper.state.CombatStates;
+import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.entity.Arrow;
@@ -112,18 +114,63 @@ public final class CombatListener implements Listener {
         plugin.skills().dispatch(player, hand, SkillSlot.LEFT, true);
     }
 
-    /** 易伤标记：被标记的目标，受到的所有来源伤害都提高。 */
+    /**
+     * 易伤标记 + 破甲：被标记 / 被破甲的目标，受到的所有来源伤害都提高。
+     *
+     * <p>两个乘区<b>独立相乘</b>：{@code ×(1 + markBonus) × (1 + pierce)}。写成一个监听器而不是
+     * 两个同优先级监听器，是为了让结算顺序确定（同优先级的执行顺序取决于注册顺序，不可靠）。</p>
+     */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onMarkedDamage(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof LivingEntity victim)) {
             return;
         }
         double bonus = plugin.states().markBonus(victim.getUniqueId());
-        if (bonus <= 0.0D) {
+        double pierce = plugin.states().armorPierce(victim.getUniqueId());
+        if (bonus <= 0.0D && pierce <= 0.0D) {
             return;
         }
-        event.setDamage(event.getDamage() * (1.0D + bonus));
-        debug(String.format("%s 身上有易伤标记 → 本次伤害 ×%.2f", victim.getName(), 1.0D + bonus));
+        double multiplier = (1.0D + bonus) * (1.0D + pierce);
+        event.setDamage(event.getDamage() * multiplier);
+        debug(String.format("%s 易伤 +%.0f%% / 破甲 +%.0f%% → 本次伤害 ×%.2f",
+                victim.getName(), bonus * 100.0D, pierce * 100.0D, multiplier));
+    }
+
+    /**
+     * 召唤物护栏：召唤者与队友不能伤害自己人的召唤物。
+     *
+     * <p>击杀召唤物也<b>不计分</b>（那个在 {@code MatchListener} 里拦），否则会出现"刷狗刷分"。</p>
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onSummonedDamage(EntityDamageByEntityEvent event) {
+        String ownerId = event.getEntity().getPersistentDataContainer()
+                .get(PDCKeys.summonedOwner(), PersistentDataType.STRING);
+        if (ownerId == null) {
+            return;
+        }
+        Player attacker = null;
+        if (event.getDamager() instanceof Player player) {
+            attacker = player;
+        } else if (event.getDamager() instanceof Projectile projectile
+                && projectile.getShooter() instanceof Player shooter) {
+            attacker = shooter;
+        }
+        if (attacker == null) {
+            return;
+        }
+        if (attacker.getUniqueId().toString().equals(ownerId)) {
+            event.setCancelled(true);
+            return;
+        }
+        Player owner;
+        try {
+            owner = Bukkit.getPlayer(java.util.UUID.fromString(ownerId));
+        } catch (IllegalArgumentException ex) {
+            return;
+        }
+        if (owner != null && SkillTargets.isProtectedTeammate(plugin, owner, attacker)) {
+            event.setCancelled(true);
+        }
     }
 
     /** 镜面反射：把打到你的飞行物弹回去。对近战无效（设计取舍）。 */

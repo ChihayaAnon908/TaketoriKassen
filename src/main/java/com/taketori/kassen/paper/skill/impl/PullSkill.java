@@ -9,6 +9,8 @@ import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
@@ -63,6 +65,15 @@ public final class PullSkill implements Skill {
                 if (damage > 0.0D) {
                     target.damage(damage, player);
                     plugin.damageNumbers().hit(player, target, damage);   // 伤害数字（A1）
+                }
+                // 2.0：拉扯命中后的减速（decelerate-*），0 = 关闭
+                int decelerateTicks = context.integer("decelerate-ticks", 0);
+                if (decelerateTicks > 0) {
+                    PotionEffectType slow = plugin.versions().potionEffect("SLOWNESS");
+                    if (slow != null) {
+                        target.addPotionEffect(new PotionEffect(slow, decelerateTicks,
+                                Math.max(0, context.integer("decelerate-amplifier", 0)), false, true, true));
+                    }
                 }
                 drawTrail(eye, target.getLocation().add(0.0D, 1.0D, 0.0D), particle);
                 pullTargetToPlayer(player, target, power, ticks);
