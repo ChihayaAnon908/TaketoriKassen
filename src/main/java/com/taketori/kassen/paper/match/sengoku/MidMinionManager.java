@@ -112,10 +112,17 @@ public final class MidMinionManager {
             return;
         }
 
-        // 分片：本 tick 只刷一个区域，下一个 tick 继续，直到一轮刷完
+        // 分片：一轮刷新摊到 shard-tick 个 tick 上（实际分片数不超过刷新区数量，
+        // 否则"分片数比区域还多"没有意义）。此前是"每 tick 固定刷一个区"，
+        // 配置里的 shard-tick 根本没被读过。
+        int shards = rules().safeShardTick(regions.size());
+        int perTick = Math.max(1, (int) Math.ceil(regions.size() / (double) shards));
+
         if (shardIndex < regions.size()) {
-            spawnAt(regions.get(shardIndex));
-            shardIndex++;
+            for (int i = 0; i < perTick && shardIndex < regions.size(); i++) {
+                spawnAt(regions.get(shardIndex));
+                shardIndex++;
+            }
             if (shardIndex >= regions.size()) {
                 shardIndex = 0;
                 nextRoundAt = now + rules().intervalTicks() * 50L;
@@ -163,9 +170,7 @@ public final class MidMinionManager {
             if (living.getHealth() > living.getMaxHealth()) {
                 living.setHealth(living.getMaxHealth());
             }
-            // AI 简化：关掉部分寻路，显著降低大量实体时的服务端压力
-            if (rules().aiSimplify() && living instanceof Mob mob) {
-                mob.setAware(true);
+            if (living instanceof Mob mob) {
                 mob.setTarget(null);
             }
             alive.add(living.getUniqueId());

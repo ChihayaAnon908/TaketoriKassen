@@ -83,10 +83,13 @@ public final class SengokuSession {
                     + " 小局开始（" + score.display() + "），时限 "
                     + rules().timeLimitSeconds() + " 秒");
         }
-        room.broadcast("<yellow>第 <white>" + currentRound + "</white> 小局开始"
-                + " <gray>（当前比分 <white>" + score.display() + "</white>"
-                + "，三局两胜）");
+        room.broadcast(msg("sengoku.round-start", "round", currentRound, "score", score.display()));
         showTitle("<yellow>第 " + currentRound + " 小局", "比分 " + score.display());
+    }
+
+    /** 取一条可配文案（{@code plain} 会做占位符替换但保留 MiniMessage 标签，正好给 broadcast 用）。 */
+    private String msg(String key, Object... placeholders) {
+        return plugin.config().messages().plain(key, placeholders);
     }
 
     /**
@@ -103,14 +106,16 @@ public final class SengokuSession {
         long seconds = (System.currentTimeMillis() - roundStartedAt) / 1000L;
 
         if (result.isDraw()) {
-            room.broadcast("<gray>第 <white>" + currentRound + "</white> 小局无人获胜"
-                    + "（<white>" + result.reason().display() + "</white>）<gray>——本局重开");
+            room.broadcast(msg("sengoku.round-draw", "round", currentRound,
+                    "reason", result.reason().display()));
             showTitle("<gray>第 " + currentRound + " 小局平局", "本局重开");
         } else {
-            room.broadcast("<green>" + result.winner().display() + " 拿下第 <white>"
-                    + currentRound + "</white> 小局"
-                    + " <gray>（<white>" + result.reason().display() + "</white>，用时 "
-                    + seconds + " 秒）<gray>　比分 <white>" + score.display() + "</white>");
+            room.broadcast(msg("sengoku.round-won",
+                    "team", result.winner().display(),
+                    "round", currentRound,
+                    "reason", result.reason().display(),
+                    "seconds", seconds,
+                    "score", score.display()));
             showTitle("<green>" + result.winner().display() + " 拿下第 " + currentRound + " 小局",
                     "比分 " + score.display());
         }
@@ -126,9 +131,8 @@ public final class SengokuSession {
             finished = true;
             room.broadcast("<dark_gray>========================================");
             room.broadcast(matchWinner == null
-                    ? "<yellow>整场结束：<gray>双方战平"
-                    : "<green>" + matchWinner.display() + " 以 <white>" + score.display()
-                            + "</white> 赢得整场！");
+                    ? msg("sengoku.match-draw")
+                    : msg("sengoku.match-won", "team", matchWinner.display(), "score", score.display()));
             showTitle(matchWinner == null ? "<yellow>整场战平"
                             : "<green>" + matchWinner.display() + " 赢得整场",
                     "最终比分 " + score.display());
@@ -144,7 +148,7 @@ public final class SengokuSession {
         if (failure != null) {
             // 重开失败（人跑光了、场地被改坏）：别把房间卡在 ENDING，直接收尾
             plugin.getLogger().warning("[sengoku] 房间 " + room.id() + " 小局重开失败：" + failure);
-            room.broadcast("<yellow>下一小局无法开始（<white>" + failure + "</white>），本场提前结束");
+            room.broadcast(msg("sengoku.round-restart-failed", "reason", failure));
             room.finish(matchWinner);
         }
     }

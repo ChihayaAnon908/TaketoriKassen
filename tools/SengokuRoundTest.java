@@ -36,21 +36,21 @@ public class SengokuRoundTest {
 
         // ── 赢下整场需要几局 ────────────────────────────────────────────
         expectInt("三局两胜需要 2 胜", 2, new SengokuRules(3, 8, SengokuRules.TimeoutWinner.TOWER_COUNT,
-                true, true, 4.0D, true).winsNeeded());
+                true, 4.0D, true).winsNeeded());
         expectInt("五局三胜需要 3 胜", 3, new SengokuRules(5, 8, SengokuRules.TimeoutWinner.TOWER_COUNT,
-                true, true, 4.0D, true).winsNeeded());
+                true, 4.0D, true).winsNeeded());
         expectInt("单局制需要 1 胜", 1, new SengokuRules(1, 8, SengokuRules.TimeoutWinner.TOWER_COUNT,
-                true, true, 4.0D, true).winsNeeded());
+                true, 4.0D, true).winsNeeded());
         expectInt("偶数 2 被规整成 3 后需要 2 胜", 2, new SengokuRules(2, 8, SengokuRules.TimeoutWinner.TOWER_COUNT,
-                true, true, 4.0D, true).winsNeeded());
+                true, 4.0D, true).winsNeeded());
 
         // ── 时限换算（含非法值兜底） ─────────────────────────────────────
         expectLong("8 分钟 = 480 秒", 480L, SengokuRules.defaults().timeLimitSeconds());
         expectLong("8 分钟 = 480000 毫秒", 480_000L, SengokuRules.defaults().timeLimitMillis());
         expectLong("0 分钟兜底成 1 分钟", 60L, new SengokuRules(3, 0, SengokuRules.TimeoutWinner.DRAW,
-                true, true, 4.0D, true).timeLimitSeconds());
+                true, 4.0D, true).timeLimitSeconds());
         expectLong("-5 分钟兜底成 1 分钟", 60L, new SengokuRules(3, -5, SengokuRules.TimeoutWinner.DRAW,
-                true, true, 4.0D, true).timeLimitSeconds());
+                true, 4.0D, true).timeLimitSeconds());
 
         // ── 三局两胜的完整流程 ──────────────────────────────────────────
         SengokuScore score = new SengokuScore();

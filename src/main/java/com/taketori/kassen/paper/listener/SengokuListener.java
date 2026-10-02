@@ -194,7 +194,8 @@ public final class SengokuListener implements Listener {
         }
         if (room.teamOf(player.getUniqueId()) != owner) {
             event.setCancelled(true);
-            player.sendActionBar(MINI.deserialize("<red>这是 " + owner.display() + " 的击破器"));
+            player.sendActionBar(MINI.deserialize(plugin.config().messages()
+                    .plain("sengoku.breaker-not-yours", "team", owner.display())));
         }
     }
 
@@ -209,7 +210,7 @@ public final class SengokuListener implements Listener {
         }
         event.setCancelled(true);
         event.getPlayer().sendActionBar(MINI.deserialize(
-                "<red>大将击破器不能丢弃 <gray>——只能带着，或阵亡时掉落"));
+                plugin.config().messages().plain("sengoku.breaker-undroppable")));
     }
 
     /** 掉落在地上的击破器不可被破坏（火焰 / 爆炸 / 岩浆 / 仙人掌 / 攻击）。 */
@@ -342,7 +343,7 @@ public final class SengokuListener implements Listener {
         }
         event.setCancelled(true);
         event.getPlayer().sendActionBar(MINI.deserialize(
-                "<red>大将击破器不能被消耗 <gray>——它只用来破坏敌方天守阁"));
+                plugin.config().messages().plain("sengoku.breaker-unconsumable")));
     }
 
     private GameRoom sengokuRoomOf(Player player) {

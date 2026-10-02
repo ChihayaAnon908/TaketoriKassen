@@ -40,15 +40,24 @@ public final class SengokuCommand {
     }
 
     public void handle(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            if (sender.hasPermission("taketori.admin")) {
+                usage(sender);
+            } else {
+                send(sender, "<red>用法：<white>/taketori sengoku score</white>");
+            }
+            return;
+        }
+        String action = args[1].toLowerCase(Locale.ROOT);
+        // score 是给所有玩家看的（比分、剩余时间、各人能量），其余是管理命令
+        if ("score".equals(action)) {
+            showScore(sender);
+            return;
+        }
         if (!sender.hasPermission("taketori.admin")) {
             send(sender, "<red>没有权限。");
             return;
         }
-        if (args.length < 2) {
-            usage(sender);
-            return;
-        }
-        String action = args[1].toLowerCase(Locale.ROOT);
         switch (action) {
             // ── 划区 ──────────────────────────────────────────────
             case "setkeep" -> setKeep(sender, args);
@@ -62,12 +71,11 @@ public final class SengokuCommand {
             case "start" -> forceStart(sender);
             case "pause" -> setPaused(sender, true);
             case "resume" -> setPaused(sender, false);
+            // endround 不指定队伍时判平局重开，与超时持平的语义一致
             case "endround" -> endRound(sender, args);
-            case "nextround" -> endRound(sender, args);
             case "towers" -> showTowers(sender);
             case "breaker" -> showBreaker(sender, args);
             case "jumppad" -> showJumpPad(sender, args);
-            case "score" -> showScore(sender);
             case "check" -> checkMap(sender);
             default -> usage(sender);
         }
@@ -241,7 +249,8 @@ public final class SengokuCommand {
             send(sender, "<gray>已经是" + (paused ? "暂停" : "进行") + "状态。");
             return;
         }
-        room.broadcast(paused ? "<yellow>对局已由管理员暂停" : "<green>对局已继续");
+        room.broadcast(plugin.config().messages().plain(
+                paused ? "sengoku.paused" : "sengoku.resumed"));
         send(sender, paused ? "<green>已暂停小局计时。" : "<green>已继续。");
     }
 
@@ -254,7 +263,16 @@ public final class SengokuCommand {
             send(sender, "<red>当前不在小局进行中。");
             return;
         }
-        TeamId winner = args.length >= 3 ? TeamId.byName(args[2]) : null;
+        TeamId winner = null;
+        if (args.length >= 3) {
+            winner = TeamId.byName(args[2]);
+            if (winner == null) {
+                // 静默判平会让管理员以为"判了红队胜"却看到 0-0 重开
+                send(sender, "<red>队伍只能是 <white>red</white> 或 <white>blue</white>，"
+                        + "收到的是 <white>" + args[2] + "</white>。不指定则判平局重开。");
+                return;
+            }
+        }
         RoundResult result = winner == null
                 ? RoundResult.draw(RoundResult.Reason.FORCED, room.elapsedSeconds())
                 : new RoundResult(winner, RoundResult.Reason.FORCED, room.elapsedSeconds());
@@ -453,11 +471,11 @@ public final class SengokuCommand {
         for (String line : List.of(
                 "start                   强制开局",
                 "pause | resume          暂停 / 继续小局计时",
-                "endround [red|blue]     强制结束本小局（可指定胜方）",
+                "endround [red|blue]     强制结束本小局（不指定则判平局重开）",
                 "towers                  查看箭楼归属与读条",
                 "breaker [red|blue]      查看击破器位置",
                 "jumppad [red|blue]      查看跳跃台状态",
-                "score                   查看比分与各人能量",
+                "score                   查看比分与各人能量（所有玩家可用）",
                 "check                   检查本场地点位是否齐全")) {
             send(sender, "<gray>  " + line);
         }

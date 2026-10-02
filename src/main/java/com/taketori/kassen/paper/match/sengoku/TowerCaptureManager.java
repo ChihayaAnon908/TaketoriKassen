@@ -87,13 +87,14 @@ public final class TowerCaptureManager {
         // 守卫检查必须排在"已经敲过钟"之前：否则守卫重刷后再敲钟会被当成成功，
         // 玩家会以为可以占领，实际上 tick 会把它清掉。
         if (room.towers().hasGuards(index)) {
-            return "先清掉箭楼附近的守卫（剩余 " + room.towers().guardCount(index) + "）";
+            return plugin.config().messages().plain("sengoku.tower-guards-alive",
+                    "count", room.towers().guardCount(index));
         }
         if (channel.armed) {
             return null;   // 已经在读条，重复敲钟不算错
         }
         if (room.towers().ownerOf(index) == team) {
-            return "这座箭楼已经属于你们";
+            return plugin.config().messages().plain("sengoku.tower-already-yours");
         }
         channel.armed = true;
         if (rules().effectiveCaptureSeconds() <= 0.0D) {
@@ -103,8 +104,8 @@ public final class TowerCaptureManager {
             room.towers().capture(index, team);
             return null;
         }
-        room.broadcast("<yellow>" + team.display() + " 敲响了箭楼 #" + index + " 的铜钟"
-                + "<gray>——站进占领区读条");
+        room.broadcast(plugin.config().messages().plain("sengoku.tower-bell-rung",
+                "team", team.display(), "tower", "箭楼 #" + index));
         if (plugin.config().debug()) {
             plugin.getLogger().info("[sengoku] 箭楼 #" + index + " 被 " + team.key() + " 敲钟激活");
         }
@@ -176,8 +177,9 @@ public final class TowerCaptureManager {
             for (Player player : pushers) {
                 String bar = SkillManager.progressBar(current, need);
                 int percent = (int) Math.round(current / need * 100.0D);
-                room.scoreboard().actionBar(player, "<yellow>占领箭楼 #" + index + "</yellow> <gray>"
-                        + bar + " <white>" + percent + "%");
+                room.scoreboard().actionBar(player, plugin.config().messages().plain(
+                        "sengoku.tower-progress",
+                        "tower", "箭楼 #" + index, "bar", bar, "percent", percent));
             }
 
             if (contest.isComplete(pushing, current, need)) {
@@ -198,8 +200,7 @@ public final class TowerCaptureManager {
         List<Player> both = new ArrayList<>(red);
         both.addAll(blue);
         for (Player player : both) {
-            room.scoreboard().actionBar(player,
-                    "<red>箭楼争夺中 <gray>——双方进度停滞，先把对面赶出去");
+            room.scoreboard().actionBar(player, plugin.config().messages().plain("sengoku.tower-contested"));
         }
     }
 

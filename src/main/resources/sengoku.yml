@@ -19,9 +19,6 @@ rounds:
   #   tower-count = 箭楼占领数多者胜，持平判平局重开（推荐：防龟缩）
   #   draw        = 直接判平局重开
   timeout-winner: tower-count
-  # 小局重置时是否保留跨局战绩（stats.yml 的累计击杀 / 拆家 / 胜场）。
-  # true = 只清战场状态，跨局统计继续累加（推荐）
-  keep-stats-across-rounds: true
 
 # ── 天守阁 ───────────────────────────────────────────────
 keep:

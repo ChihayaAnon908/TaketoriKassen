@@ -14,12 +14,9 @@ import java.util.Locale;
  * @param intervalSeconds 刷新间隔（秒）
  * @param perSpawn       每次刷新几只
  * @param maxAlive       场上上限，达到就停止刷新（性能兜底）
- * @param shardTick      分片：每 tick 只处理 1/N 个刷新区，避免一次性全刷造成卡顿
- * @param aiSimplify     是否简化 AI（关闭部分寻路），大量实体时的性能开关
+ * @param shardTick      分片：一轮刷新摊到 N 个 tick 上（实际分片数不超过刷新区数量）
  * @param health         血量上限
  * @param damage         攻击力
- * @param scoreOnKill    击杀给的对局积分；<b>默认 0</b>——刻意不计分，
- *                       否则"刷小兵赢比赛"会变成有效战术
  */
 public record MidMinionRules(String entity,
                              String display,
@@ -27,15 +24,13 @@ public record MidMinionRules(String entity,
                              int perSpawn,
                              int maxAlive,
                              int shardTick,
-                             boolean aiSimplify,
                              double health,
-                             double damage,
-                             int scoreOnKill) {
+                             double damage) {
 
-    /** 默认：与月人同载体、每 6 秒 4 只、上限 40、分片 4、不计分。 */
+    /** 默认：与月人同载体、每 6 秒 4 只、上限 40、分片 4。 */
     public static MidMinionRules defaults() {
         return new MidMinionRules("ZOMBIE", "<gray>中地小兵</gray>",
-                6, 4, 40, 4, true, 20.0D, 4.0D, 0);
+                6, 4, 40, 4, 20.0D, 4.0D);
     }
 
     /** 刷新间隔（tick），至少 1 tick。 */

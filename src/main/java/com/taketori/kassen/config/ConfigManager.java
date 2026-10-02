@@ -330,8 +330,6 @@ public final class ConfigManager {
                 rounds == null ? fallback.timeLimitMinutes()
                         : rounds.getInt("time-limit-minutes", fallback.timeLimitMinutes()),
                 timeout,
-                rounds == null ? fallback.keepStatsAcrossRounds()
-                        : rounds.getBoolean("keep-stats-across-rounds", fallback.keepStatsAcrossRounds()),
                 keep == null ? fallback.keepInvulnerable()
                         : keep.getBoolean("invulnerable", fallback.keepInvulnerable()),
                 keep == null ? fallback.keepArmRadius()
@@ -472,10 +470,8 @@ public final class ConfigManager {
                 yaml.getInt("per-spawn", fallback.perSpawn()),
                 yaml.getInt("max-alive", fallback.maxAlive()),
                 yaml.getInt("shard-tick", fallback.shardTick()),
-                yaml.getBoolean("ai-simplify", fallback.aiSimplify()),
                 yaml.getDouble("health", fallback.health()),
-                yaml.getDouble("damage", fallback.damage()),
-                yaml.getInt("score-on-kill", fallback.scoreOnKill()));
+                yaml.getDouble("damage", fallback.damage()));
     }
 
     /** 战国模式的中地小兵规则（{@code sengoku-minions.yml}）。 */

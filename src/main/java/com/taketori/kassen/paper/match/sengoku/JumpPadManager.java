@@ -93,8 +93,8 @@ public final class JumpPadManager {
             return;
         }
         active.add(team);
-        room.broadcast("<green>" + team.display() + " 的跳跃台已出现在己方天守阁门前"
-                + "<gray>——复活后踩上去即可直达已占领的箭楼");
+        room.broadcast(plugin.config().messages().plain("sengoku.jumppad-ready",
+                "team", team.display()));
         plugin.fx().particle(spec().particle(), pad, 30, 0.6D);
         plugin.fx().sound(spec().sound(), pad, 1.0F, 1.4F);
     }
@@ -160,7 +160,8 @@ public final class JumpPadManager {
             // 一座己方箭楼都没有（跳跃台刚激活但归属又被打回去了）：给一次说明就走
             if (until == null) {
                 cooldowns.put(player.getUniqueId(), now + 3000L);
-                room.scoreboard().actionBar(player, "<gray>暂时没有可前往的己方箭楼");
+                room.scoreboard().actionBar(player,
+                        plugin.config().messages().plain("sengoku.jumppad-no-target"));
             }
             return;
         }
@@ -250,7 +251,7 @@ public final class JumpPadManager {
         return best;
     }
 
-    /** 箭楼的落点：占领区中心抬高 1 格，避免卡在方块里。 */
+    /** 箭楼的落点：占领区中心校正到可站立位置（否则可能落在墙里、悬空或虚空）。 */
     private Location towerLanding(int index) {
         var arena = room.arena();
         if (arena == null) {
@@ -261,7 +262,7 @@ public final class JumpPadManager {
             return null;
         }
         Location center = region.center();
-        return center == null ? null : center.add(0.0D, 1.0D, 0.0D);
+        return center == null ? null : SengokuSpots.onGround(center);
     }
 
     /** 某玩家还要等多久才能再用（秒，0 = 可用）。 */

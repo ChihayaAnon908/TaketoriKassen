@@ -45,6 +45,8 @@ public final class SiegeBreakerManager {
 
     /** 每队当前掉在地上、还没被捡走的击破器。 */
     private final Map<TeamId, Item> dropped = new EnumMap<>(TeamId.class);
+    /** 曾经发放过击破器的队伍（respawn-on-recapture 关闭时用来做到"一队只发一次"）。 */
+    private final java.util.Set<TeamId> everSpawned = java.util.EnumSet.noneOf(TeamId.class);
     /** 每个携带者的读条进度（秒）。 */
     private final Map<UUID, Double> progress = new HashMap<>();
     /** 同一个玩家两次"离开范围"提示之间的间隔，避免刷屏。 */
@@ -95,7 +97,14 @@ public final class SiegeBreakerManager {
      * 已经有一枚在地上、或已经有人拿在手里时不再生成（{@code one-per-team}）。</p>
      */
     public void ensureBreaker(TeamId team) {
-        if (team == null || rules().onePerTeam() && hasBreaker(team)) {
+        if (team == null) {
+            return;
+        }
+        if (rules().onePerTeam() && hasBreaker(team)) {
+            return;
+        }
+        if (!rules().respawnOnRecapture() && everSpawned.contains(team)) {
+            // 关掉"重新占领自动补齐"时，一队只发一次——否则每占一次箭楼就多发一枚
             return;
         }
         Location spot = breakerSpawn(team);
@@ -106,14 +115,17 @@ public final class SiegeBreakerManager {
             }
             return;
         }
+        // 落点校正：门前点 + 外推很容易把物品塞进墙里或悬空，玩家根本捡不到
+        spot = SengokuSpots.onGround(spot);
         ItemStack stack = buildBreaker(team);
         Item item = spot.getWorld().dropItem(spot, stack);
         item.setUnlimitedLifetime(true);   // 需求：不可破坏，同时也不该自己消失
         item.setCanMobPickup(false);
         item.setGlowing(rules().glow());
         dropped.put(team, item);
-        room.broadcast("<gold>大将击破器已出现在 " + team.opposite().display()
-                + " 天守阁门前 <gray>——" + team.display() + " 可取");
+        everSpawned.add(team);
+        room.broadcast(plugin.config().messages().plain("sengoku.breaker-spawned",
+                "team", team.display(), "keep", team.opposite().display() + " 天守阁门前"));
         plugin.fx().particle("END_ROD", spot, 30, 0.6D);
         plugin.fx().sound("BLOCK_BEACON_ACTIVATE", spot, 1.0F, 1.2F);
         if (plugin.config().debug()) {
@@ -278,6 +290,11 @@ public final class SiegeBreakerManager {
         progress.keySet().removeIf(id -> !active.contains(id));
         lastLeaveNotice.keySet().removeIf(id -> !active.contains(id));
 
+        // 主动拾取：走进 pick-radius 就直接进背包。
+        // 原版的拾取半径是固定值、配置改不动，所以这里自己判定——
+        // 这样 siege-breaker.pick-radius 才真的有效。
+        tryPickup(activePlayers);
+
         for (Player player : activePlayers) {
             TeamId carrier = carriedBreakerTeam(player);
             if (carrier == null) {
@@ -288,7 +305,7 @@ public final class SiegeBreakerManager {
                 // 该职业不允许操作击破器：不推进，但要说明原因，否则玩家会以为坏了
                 progress.remove(player.getUniqueId());
                 room.scoreboard().actionBar(player,
-                        "<red>该角色无法操作大将击破器 <gray>——交给队友");
+                        plugin.config().messages().plain("sengoku.breaker-role-blocked"));
                 continue;
             }
             if (!insideKeep(player, carrier.opposite())) {
@@ -305,8 +322,10 @@ public final class SiegeBreakerManager {
             }
             String bar = SkillManager.progressBar(current, need);
             int percent = (int) Math.round(current / need * 100.0D);
-            room.scoreboard().actionBar(player, "<gold>破坏 " + carrier.opposite().display()
-                    + " 天守阁</gold> <gray>" + bar + " <white>" + percent + "%");
+            room.scoreboard().actionBar(player, plugin.config().messages().plain(
+                    "sengoku.breaker-progress",
+                    "keep", carrier.opposite().display() + " 天守阁",
+                    "bar", bar, "percent", percent));
             if (current >= need) {
                 arm(player, carrier, (long) need);
                 return;
@@ -314,11 +333,66 @@ public final class SiegeBreakerManager {
         }
     }
 
+    /**
+     * 归属队玩家走进 {@code pick-radius} 内即自动拾取。
+     *
+     * <p>自己判定而不是靠原版：原版的拾取半径是固定值、配置改不动，所以
+     * {@code siege-breaker.pick-radius} 一直是死键。原版拾取的护栏
+     * （{@code SengokuListener.onBreakerPickup}）仍然保留做兜底。</p>
+     */
+    private void tryPickup(List<Player> activePlayers) {
+        double radius = Math.max(0.5D, rules().pickRadius());
+        for (TeamId team : TeamId.values()) {
+            Item item = dropped.get(team);
+            if (item == null) {
+                continue;
+            }
+            if (!item.isValid() || item.isDead()) {
+                dropped.remove(team);
+                continue;
+            }
+            Location spot = item.getLocation();
+            if (spot.getWorld() == null) {
+                continue;
+            }
+            for (Player player : activePlayers) {
+                if (room.teamOf(player.getUniqueId()) != team) {
+                    continue;   // 只有归属队能拿
+                }
+                if (!player.getWorld().equals(spot.getWorld())) {
+                    continue;
+                }
+                if (player.getLocation().distanceSquared(spot) > radius * radius) {
+                    continue;
+                }
+                give(player, team, item);
+                break;
+            }
+        }
+    }
+
+    private void give(Player player, TeamId team, Item item) {
+        ItemStack stack = item.getItemStack();
+        item.remove();
+        dropped.remove(team);
+        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(stack);
+        if (!leftovers.isEmpty()) {
+            // 背包满了：掉回脚边而不是凭空消失——它不可破坏，等队友来捡
+            for (ItemStack left : leftovers.values()) {
+                player.getWorld().dropItemNaturally(player.getLocation(), left);
+            }
+        }
+        player.updateInventory();
+        room.scoreboard().actionBar(player, plugin.config().messages().plain("sengoku.breaker-picked",
+                "keep", team.opposite().display() + " 天守阁"));
+        plugin.fx().sound("ENTITY_ITEM_PICKUP", player, 1.0F, 1.2F);
+    }
+
     /** 读满：本小局立即判定携带方胜利。 */
-    private void arm(Player player, TeamId team, long seconds) {
-        progress.remove(player.getUniqueId());
-        room.broadcast("<gold>" + player.getName() + " 用大将击破器攻陷了 "
-                + team.opposite().display() + " 的天守阁！");
+    private void arm(Player player, TeamId team, long seconds) {        progress.remove(player.getUniqueId());
+        room.broadcast(plugin.config().messages().plain("sengoku.breaker-armed",
+                "player", player.getName(),
+                "keep", team.opposite().display() + " 天守阁"));
         plugin.fx().sound("ENTITY_ENDER_DRAGON_GROWL", player.getLocation(), 1.0F, 1.0F);
         room.sengoku().onRoundEnd(new RoundResult(team, RoundResult.Reason.BREAKER_ARMED,
                 Math.max(0L, seconds)));
@@ -331,8 +405,8 @@ public final class SiegeBreakerManager {
             return;
         }
         lastLeaveNotice.put(player.getUniqueId(), now);
-        room.scoreboard().actionBar(player, "<gray>带着击破器进入 " + carrier.opposite().display()
-                + " 天守阁范围内才能开始破坏");
+        room.scoreboard().actionBar(player, plugin.config().messages().plain("sengoku.breaker-leave",
+                "keep", carrier.opposite().display() + " 天守阁"));
     }
 
     /**

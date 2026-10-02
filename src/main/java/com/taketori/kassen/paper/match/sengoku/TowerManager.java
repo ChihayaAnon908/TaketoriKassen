@@ -14,6 +14,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
+import org.bukkit.entity.Player;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -57,6 +58,8 @@ public final class TowerManager {
     private final TaketoriPlugin plugin;
     private final Map<Integer, TowerState> towers = new LinkedHashMap<>();
     private BukkitTask task;
+    /** tick 计数：索敌之类的低频动作按它节流。 */
+    private long ticks;
 
     public TowerManager(GameRoom room) {
         this.room = room;
@@ -95,6 +98,7 @@ public final class TowerManager {
             removeGuards(state);
         }
         towers.clear();
+        ticks = 0L;
     }
 
     // ---------------------------------------------------------------- 归属查询
@@ -191,8 +195,19 @@ public final class TowerManager {
         state.owner = team;
         // 占领后重新安排守卫：下一次争夺仍要先清守卫
         state.nextRespawnAt = System.currentTimeMillis() + Math.max(1, rules().guardRespawnSeconds()) * 1000L;
-        room.broadcast("<yellow>⚑ " + team.display() + " 占领了箭楼 #" + index
-                + "</yellow>" + (previous == null ? "" : " <gray>（原属 " + previous.display() + "）"));
+        room.broadcast(plugin.config().messages().plain("sengoku.tower-captured",
+                "team", team.display(),
+                "tower", "箭楼 #" + index,
+                "previous", previous == null ? ""
+                        : plugin.config().messages().plain("sengoku.tower-previous",
+                                "team", previous.display())));
+        // 音效与粒子：此前 bell.sound / bell.particle 只被 doctor 打印，这里才真正生效
+        Location center = towerCenter(index);
+        if (center != null) {
+            TowerRules towerRules = rules();
+            plugin.fx().particle(towerRules.bellParticle(), center, 40, 0.8D);
+            plugin.fx().sound(towerRules.bellSound(), center, 1.2F, 1.0F);
+        }
         if (plugin.config().debug()) {
             plugin.getLogger().info("[sengoku] 房间 " + room.id() + " 箭楼 #" + index
                     + " 归属 " + (previous == null ? "中立" : previous.key()) + " → " + team.key());
@@ -223,6 +238,9 @@ public final class TowerManager {
             return;
         }
         long now = System.currentTimeMillis();
+        ticks++;
+        boolean retargetNow = ticks % 20L == 0L;   // 索敌每秒一次，不跟着 tick 跑
+        TowerRules towerRules = rules();
         for (Map.Entry<Integer, TowerState> entry : towers.entrySet()) {
             int index = entry.getKey();
             TowerState state = entry.getValue();
@@ -233,11 +251,17 @@ public final class TowerManager {
                 return entity == null || entity.isDead() || !entity.isValid();
             });
 
+            // ①b 守卫索敌：aggro-radius 内的敌方玩家（此前该配置键无人读取）
+            if (retargetNow && !state.guards.isEmpty()) {
+                retargetGuards(index, state, towerRules);
+            }
+
             // ② 全灭的瞬间安排重刷，并给两侧播报（"可以去敲钟了"是关键信息）
             if (state.guards.isEmpty() && state.nextRespawnAt == 0L) {
                 state.nextRespawnAt = now + Math.max(1, rules().guardRespawnSeconds()) * 1000L;
-                room.broadcast("<green>箭楼 #" + index + " 的守卫已被肃清"
-                        + "<gray>——" + Math.max(1, rules().guardRespawnSeconds()) + " 秒内敲响铜钟即可占领");
+                room.broadcast(plugin.config().messages().plain("sengoku.tower-guards-cleared",
+                        "tower", "箭楼 #" + index,
+                        "seconds", Math.max(1, rules().guardRespawnSeconds())));
                 if (plugin.config().debug()) {
                     plugin.getLogger().info("[sengoku] 箭楼 #" + index + " 守卫已清空");
                 }
@@ -281,9 +305,14 @@ public final class TowerManager {
             return;
         }
         for (int i = 0; i < spec.count(); i++) {
-            Location spot = center.clone().add(
-                    (Math.random() - 0.5D) * 4.0D, 0.0D, (Math.random() - 0.5D) * 4.0D);
-            Entity spawned = center.getWorld().spawnEntity(spot, type);
+            // 散布半径取 patrol-radius 的三分之一并封顶 4 格：
+            // 配置写大了守卫会散到箭楼外围，反而更难清、也不像"盘踞在箭楼附近"
+            double spread = Math.max(1.0D, Math.min(4.0D, spec.patrolRadius() / 3.0D));
+            // 落点校正：随机偏移很容易把守卫塞进墙里或让它悬空（窒息 / 摔伤）
+            Location spot = SengokuSpots.onGround(center.clone().add(
+                    (Math.random() - 0.5D) * spread * 2.0D, 0.0D,
+                    (Math.random() - 0.5D) * spread * 2.0D));
+            Entity spawned = spot.getWorld().spawnEntity(spot, type);
             if (!(spawned instanceof LivingEntity living)) {
                 spawned.remove();
                 continue;
@@ -355,6 +384,55 @@ public final class TowerManager {
             return null;
         }
         return arena.sengoku().guardSpawn(index);
+    }
+
+    /** 箭楼占领区中心（播报、音效粒子都用它）。 */
+    private Location towerCenter(int index) {
+        var arena = room.arena();
+        if (arena == null) {
+            return null;
+        }
+        com.taketori.kassen.paper.match.CuboidRegion region = arena.sengoku().tower(index);
+        return region == null ? null : region.center();
+    }
+
+    /**
+     * 让守卫盯住 {@code guards.*.aggro-radius} 内最近的敌方玩家。
+     *
+     * <p>这个配置键此前无人读取——守卫只会被原版 AI 自然触发，箭楼周围实际上"站着不动"。</p>
+     */
+    private void retargetGuards(int index, TowerState state, TowerRules towerRules) {
+        double radius = Math.max(1.0D, towerRules.oxDemon().aggroRadius());
+        for (UUID id : state.guards) {
+            Entity entity = Bukkit.getEntity(id);
+            if (!(entity instanceof Mob mob) || mob.isDead()) {
+                continue;
+            }
+            mob.setTarget(nearestEnemy(mob.getLocation(), radius));
+        }
+    }
+
+    /** 距某点 radius 内最近的玩家（只看参赛者与旁观排除）。 */
+    private Player nearestEnemy(Location from, double radius) {
+        if (from == null || from.getWorld() == null) {
+            return null;
+        }
+        Player best = null;
+        double bestDistance = radius * radius;
+        for (Player player : from.getWorld().getPlayers()) {
+            if (plugin.spectator().isSpectator(player)) {
+                continue;
+            }
+            if (room.teamOf(player.getUniqueId()) == null) {
+                continue;   // 未分队的旁观者 / 管理员不算目标
+            }
+            double distance = player.getLocation().distanceSquared(from);
+            if (distance <= bestDistance) {
+                bestDistance = distance;
+                best = player;
+            }
+        }
+        return best;
     }
 
     /** 当前每座箭楼的守卫数（调试与 doctor 用）。 */

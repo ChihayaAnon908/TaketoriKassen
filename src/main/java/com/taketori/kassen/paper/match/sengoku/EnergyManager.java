@@ -65,7 +65,7 @@ public final class EnergyManager {
         }
         if (!config.isFull(before) && config.isFull(after)) {
             room.scoreboard().actionBar(player,
-                    "<gold>能量已满 <gray>——按 <white>Q</white> 释放必杀技");
+                    plugin.config().messages().plain("sengoku.energy-full"));
             plugin.fx().sound("BLOCK_NOTE_BLOCK_BELL", player, 1.0F, 1.4F);
             return;
         }
@@ -126,9 +126,10 @@ public final class EnergyManager {
 
         plugin.fx().particle(spec.particle(), center.clone().add(0.0D, 0.5D, 0.0D), 40, radius * 0.4D);
         plugin.fx().sound(spec.sound(), center, 1.2F, 1.0F);
-        room.broadcast("<gold>" + player.getName() + " 释放了必杀技"
-                + "<gray>（命中 " + targets.size() + " 个目标）");
-        room.scoreboard().actionBar(player, "<gold>必杀技已释放 <gray>——能量清空，继续攒");
+        room.broadcast(plugin.config().messages().plain("sengoku.ultimate-broadcast",
+                "player", player.getName(), "count", targets.size()));
+        room.scoreboard().actionBar(player,
+                plugin.config().messages().plain("sengoku.ultimate-cast"));
         if (plugin.config().debug()) {
             plugin.getLogger().info("[sengoku] " + player.getName() + " 释放必杀 "
                     + spec.type() + "，命中 " + targets.size() + " 个目标");
@@ -144,8 +145,8 @@ public final class EnergyManager {
         }
         // BossBar 那条留给小局比分，所以这里只实现动作栏；配成 bossbar 时退化为动作栏
         String bar = buildBar(current, config.safeMax());
-        room.scoreboard().actionBar(player, "<aqua>能量 " + bar + " <white>"
-                + current + "/" + config.safeMax());
+        room.scoreboard().actionBar(player, plugin.config().messages().plain("sengoku.energy-bar",
+                "bar", bar, "current", current, "max", config.safeMax()));
     }
 
     /** 十格能量条。 */

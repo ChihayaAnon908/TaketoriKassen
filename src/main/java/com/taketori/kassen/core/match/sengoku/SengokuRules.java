@@ -6,15 +6,13 @@ package com.taketori.kassen.core.match.sengoku;
  * @param bestOf                整场赛制：3 = 三局两胜、5 = 五局三胜（偶数会被规整成奇数）
  * @param timeLimitMinutes      单个小局的时限（分钟），到点按 {@code timeoutWinner} 判定
  * @param timeoutWinner         超时判定方式
- * @param keepStatsAcrossRounds 小局重置时是否保留跨局战绩（{@code stats.yml} 的累计击杀 / 拆家）——<b>保留</b>是设计决定，重置只清战场
  * @param keepInvulnerable      天守阁是否永久不可直接破坏（只能走击破器）
- * @param keepArmRadius         击破器在敌方天守阁的读条判定半径（格）
+ * @param keepArmRadius         击破器读条判定在区域之外的宽容半径（格）
  * @param protectKeepBlocks     是否拦截天守阁区域的方块破坏与爆炸
  */
 public record SengokuRules(int bestOf,
                            int timeLimitMinutes,
                            TimeoutWinner timeoutWinner,
-                           boolean keepStatsAcrossRounds,
                            boolean keepInvulnerable,
                            double keepArmRadius,
                            boolean protectKeepBlocks) {
@@ -28,9 +26,9 @@ public record SengokuRules(int bestOf,
         DRAW
     }
 
-    /** 默认：三局两胜、8 分钟、超时看箭楼、跨局战绩保留、天守阁无敌、读条半径 4 格。 */
+    /** 默认：三局两胜、8 分钟、超时看箭楼、天守阁无敌、外扩容差 4 格。 */
     public static SengokuRules defaults() {
-        return new SengokuRules(3, 8, TimeoutWinner.TOWER_COUNT, true, true, 4.0D, true);
+        return new SengokuRules(3, 8, TimeoutWinner.TOWER_COUNT, true, 4.0D, true);
     }
 
     /**

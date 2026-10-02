@@ -366,9 +366,7 @@ public final class TaketoriPlugin extends JavaPlugin {
         lines.add("中地小兵: " + resolveEntityName(midMinions.entity(), 1)
                 + " / 每 " + midMinions.intervalSeconds() + " 秒 " + midMinions.safePerSpawn() + " 只"
                 + " / 上限 " + midMinions.safeMaxAlive()
-                + " / 分片 " + midMinions.shardTick()
-                + " / 击杀积分 " + midMinions.scoreOnKill()
-                + (midMinions.scoreOnKill() > 0 ? " ⚠ 建议保持 0，否则刷小兵能赢比赛" : ""));
+                + " / 分片 " + midMinions.shardTick());
 
         var energy = config.energyRules();
         var ultimate = energy.ultimateFor(null);
