@@ -62,6 +62,15 @@ public final class PDCKeys {
     /** 弹体命中时挂的破甲时长（tick）——与 mark-ticks 分开，两者可以独立配。 */
     private static NamespacedKey projArmorPierceTicks;
 
+    /**
+     * 箭楼守卫所属的箭楼序号（整数）。
+     *
+     * <p>守卫靠它反查自己属于哪座箭楼——需求要求"清空守卫才能占领"，
+     * 所以必须能随时统计某座箭楼还剩几只守卫；用 PDC 而不是维护一张
+     * {@code Map<实体, 序号>} 是为了让守卫跨区块卸载/重载后仍然认得出自己。</p>
+     */
+    private static NamespacedKey towerGuardIndex;
+
     private PDCKeys() {
     }
 
@@ -101,6 +110,7 @@ public final class PDCKeys {
         arrowDebuffChance = new NamespacedKey(plugin, "arrow_debuff_chance");
 
         summonedOwner = new NamespacedKey(plugin, "summoned_owner");
+        towerGuardIndex = new NamespacedKey(plugin, "tower_guard_index");
 
         projEchoBonus = new NamespacedKey(plugin, "proj_echo_bonus");
         projMarkBonus = new NamespacedKey(plugin, "proj_mark_bonus");
@@ -273,5 +283,10 @@ public final class PDCKeys {
     /** 弹体命中时施加的破甲时长（tick）。 */
     public static NamespacedKey projArmorPierceTicks() {
         return projArmorPierceTicks;
+    }
+
+    /** 箭楼守卫所属的箭楼序号。 */
+    public static NamespacedKey towerGuardIndex() {
+        return towerGuardIndex;
     }
 }

@@ -274,6 +274,9 @@ public final class GameRoom {
     /** 战国模式的小局编排（懒加载）。 */
     private com.taketori.kassen.paper.match.sengoku.SengokuSession sengokuSession;
 
+    /** 战国模式的箭楼（懒加载）。 */
+    private com.taketori.kassen.paper.match.sengoku.TowerManager sengokuTowers;
+
     /**
      * 本房间是否战国 3v3 模式。
      *
@@ -298,6 +301,14 @@ public final class GameRoom {
             sengokuSession = new com.taketori.kassen.paper.match.sengoku.SengokuSession(this);
         }
         return sengokuSession;
+    }
+
+    /** 战国模式的箭楼（懒加载）。 */
+    public com.taketori.kassen.paper.match.sengoku.TowerManager towers() {
+        if (sengokuTowers == null) {
+            sengokuTowers = new com.taketori.kassen.paper.match.sengoku.TowerManager(this);
+        }
+        return sengokuTowers;
     }
 
     public boolean isRunning() {
@@ -1277,9 +1288,10 @@ public final class GameRoom {
         startedAt = System.currentTimeMillis();
         endedAt = 0L;
 
-        // 战国模式：通知小局编排层开始本局计时（非战国房间不会创建它，这里零开销）
+        // 战国模式：通知小局编排层开始本局计时 + 刷箭楼守卫（非战国房间不会创建它们）
         if (isSengoku()) {
             sengoku().onRoundStart();
+            towers().start();
         }
 
         minions.start();
@@ -1531,9 +1543,12 @@ public final class GameRoom {
         clearSkillProjectiles();
         clearDroppedItems();
         clearSummons();
-        // 战国：小局计时器也归这里停（房间收尾 / 重开都会经过本方法）
+        // 战国：小局计时器与箭楼守卫也归这里停（房间收尾 / 重开都会经过本方法）
         if (sengokuSession != null) {
             sengokuSession.stop();
+        }
+        if (sengokuTowers != null) {
+            sengokuTowers.stop();
         }
     }
 
