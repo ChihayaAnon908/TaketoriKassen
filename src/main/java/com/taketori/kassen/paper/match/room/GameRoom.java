@@ -271,6 +271,9 @@ public final class GameRoom {
     /** 战国模式的天守阁管理（懒加载：非战国房间永远不会创建它）。 */
     private com.taketori.kassen.paper.match.sengoku.KeepManager sengokuKeep;
 
+    /** 战国模式的小局编排（懒加载）。 */
+    private com.taketori.kassen.paper.match.sengoku.SengokuSession sengokuSession;
+
     /**
      * 本房间是否战国 3v3 模式。
      *
@@ -287,6 +290,14 @@ public final class GameRoom {
             sengokuKeep = new com.taketori.kassen.paper.match.sengoku.KeepManager(this);
         }
         return sengokuKeep;
+    }
+
+    /** 战国模式的小局编排（懒加载：非战国房间永远不会创建它）。 */
+    public com.taketori.kassen.paper.match.sengoku.SengokuSession sengoku() {
+        if (sengokuSession == null) {
+            sengokuSession = new com.taketori.kassen.paper.match.sengoku.SengokuSession(this);
+        }
+        return sengokuSession;
     }
 
     public boolean isRunning() {
@@ -1266,6 +1277,11 @@ public final class GameRoom {
         startedAt = System.currentTimeMillis();
         endedAt = 0L;
 
+        // 战国模式：通知小局编排层开始本局计时（非战国房间不会创建它，这里零开销）
+        if (isSengoku()) {
+            sengoku().onRoundStart();
+        }
+
         minions.start();
         loot.start();
         if (isPve()) {
@@ -1515,6 +1531,10 @@ public final class GameRoom {
         clearSkillProjectiles();
         clearDroppedItems();
         clearSummons();
+        // 战国：小局计时器也归这里停（房间收尾 / 重开都会经过本方法）
+        if (sengokuSession != null) {
+            sengokuSession.stop();
+        }
     }
 
     /**
@@ -1664,6 +1684,42 @@ public final class GameRoom {
     /** 达到目标分 / 时间到。 */
     public void finish(TeamId winnerTeam) {
         settle(winnerTeam, true);
+    }
+
+    /**
+     * 战国模式：小局之间重开（队伍保留，重新进笼开局）。
+     *
+     * <p>{@link #beginMatch(boolean)} 依赖"等待名单"，而小局重开时玩家已经在 {@code teams} 里，
+     * 所以先把参赛者填回 waiting 再复用它——这样传送、建笼、开局播报的既有流程一行都不用改。
+     * 离线者会被 {@code beginMatch} 的名单锁定机制自动剔除，这里不必特殊处理。</p>
+     *
+     * @return 失败原因；成功返回 null
+     */
+    public String restartRound() {
+        waiting.clear();
+        for (UUID id : teams.keySet()) {
+            Player player = Bukkit.getPlayer(id);
+            if (player != null && player.isOnline() && !plugin.spectator().isSpectator(player)) {
+                waiting.add(id);
+            }
+        }
+        if (waiting.isEmpty()) {
+            return "没有在线玩家可以继续";
+        }
+        return beginMatch(true);
+    }
+
+    /**
+     * 战国模式：清掉上一小局留下的战场状态（小兵、召唤物、掉落物、技能弹体）。
+     *
+     * <p>队伍、比分与跨局战绩<b>不动</b>——它们属于整场而不是某一小局，
+     * 这也是 {@code SengokuScore} 单独成类的原因。</p>
+     */
+    public void resetSengokuBattlefield() {
+        stopComponents();
+        clearSummons();
+        clearDroppedItems();
+        clearSkillProjectiles();
     }
 
     /**
