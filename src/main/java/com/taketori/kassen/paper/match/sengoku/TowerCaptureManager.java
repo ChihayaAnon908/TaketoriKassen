@@ -84,11 +84,13 @@ public final class TowerCaptureManager {
         if (channel == null) {
             return "这座箭楼不存在";
         }
-        if (channel.armed) {
-            return null;   // 已经在读条，重复敲钟不算错
-        }
+        // 守卫检查必须排在"已经敲过钟"之前：否则守卫重刷后再敲钟会被当成成功，
+        // 玩家会以为可以占领，实际上 tick 会把它清掉。
         if (room.towers().hasGuards(index)) {
             return "先清掉箭楼附近的守卫（剩余 " + room.towers().guardCount(index) + "）";
+        }
+        if (channel.armed) {
+            return null;   // 已经在读条，重复敲钟不算错
         }
         if (room.towers().ownerOf(index) == team) {
             return "这座箭楼已经属于你们";
@@ -136,6 +138,14 @@ public final class TowerCaptureManager {
             int index = entry.getKey();
             Channel channel = entry.getValue();
             if (!channel.armed) {
+                continue;
+            }
+            // 守卫重刷了 → 占领窗口关闭。没有这一步的话，红队清完守卫敲钟走开、
+            // 20 秒后守卫刷回来，蓝队可以直接走进来读满——「先清守卫」这条规则被绕过，
+            // 而且"谁敲的钟"与"谁能读条"完全解耦。
+            if (room.towers().hasGuards(index)) {
+                channel.armed = false;
+                channel.progress.clear();
                 continue;
             }
 

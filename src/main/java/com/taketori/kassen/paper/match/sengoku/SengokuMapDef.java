@@ -302,6 +302,20 @@ public final class SengokuMapDef {
         return keeps.isEmpty() && towers.isEmpty() && midMinionRegions.isEmpty() && jumpPads.isEmpty();
     }
 
+    /**
+     * 全部<b>区域</b>（天守阁 / 箭楼占领区 / 中地小兵刷新区）。
+     *
+     * <p>供 {@code ArenaDef.regions()} 并进"对局区域"用——那里拼出的范围决定了
+     * 「对局中禁止破坏与放置」的覆盖面，以及结算时清理掉落物的范围。
+     * 不含点位类（门前 / 铜钟 / 守卫点 / 跳跃台）：它们不是区域，无法用于包含判定。</p>
+     */
+    public List<CuboidRegion> regions() {
+        List<CuboidRegion> result = new ArrayList<>(keeps.values());
+        result.addAll(towers.values());
+        result.addAll(midMinionRegions.values());
+        return result;
+    }
+
     public void clear() {
         keeps.clear();
         keepDoors.clear();

@@ -23,6 +23,7 @@ import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.ItemDespawnEvent;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
@@ -44,6 +45,25 @@ public final class SengokuListener implements Listener {
     private static final MiniMessage MINI = MiniMessage.miniMessage();
     /** 提示节流间隔：天守阁本来就打不动，每次挖都发消息会刷屏。 */
     private static final long NOTICE_INTERVAL_MILLIS = 3000L;
+    /**
+     * 会"吃掉"手持物的方块。
+     *
+     * <p>击破器被喂进这些方块就没了（营火当燃料、堆肥桶发酵、讲台放书…），
+     * 而它们都不在容器护栏的覆盖范围内（那条只管物品栏）。</p>
+     */
+    private static final java.util.Set<org.bukkit.Material> CONSUMING_BLOCKS = java.util.EnumSet.of(
+            org.bukkit.Material.BEACON,   // 右击已激活的信标会吃掉手持的下界之星——正好是击破器的默认材质
+            org.bukkit.Material.CAMPFIRE,
+            org.bukkit.Material.SOUL_CAMPFIRE,
+            org.bukkit.Material.COMPOSTER,
+            org.bukkit.Material.LECTERN,
+            org.bukkit.Material.FLOWER_POT,
+            org.bukkit.Material.DECORATED_POT,
+            org.bukkit.Material.JUKEBOX,
+            org.bukkit.Material.CAULDRON,
+            org.bukkit.Material.WATER_CAULDRON,
+            org.bukkit.Material.LAVA_CAULDRON,
+            org.bukkit.Material.POWDER_SNOW_CAULDRON);
 
     private final TaketoriPlugin plugin;
     private final Map<UUID, Long> lastNotice = new ConcurrentHashMap<>();
@@ -275,7 +295,58 @@ public final class SengokuListener implements Listener {
         room.energy().add(killer, plugin.config().energyRules().safePerMinion());
     }
 
-    private GameRoom sengokuRoomOf(Player player) {        if (player == null) {
+    /**
+     * 击破器不能通过<b>拖拽</b>进容器。
+     *
+     * <p>点击与拖拽是两条独立的事件路径：只拦 {@link InventoryClickEvent} 的话，
+     * 按住左键把击破器拖进箱子依然能成功——这正是武器护栏当年踩过的坑。</p>
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBreakerInventoryDrag(InventoryDragEvent event) {
+        if (!(event.getWhoClicked() instanceof Player)) {
+            return;
+        }
+        var top = event.getView().getTopInventory();
+        if (top.getHolder() instanceof org.bukkit.inventory.PlayerInventory) {
+            return;
+        }
+        if (SiegeBreakerManager.breakerTeamOf(event.getOldCursor()) == null) {
+            return;
+        }
+        for (int rawSlot : event.getRawSlots()) {
+            if (rawSlot < top.getSize()) {
+                event.setCancelled(true);
+                return;
+            }
+        }
+    }
+
+    /**
+     * 击破器不能被"当材料喂给方块"消耗掉（营火 / 堆肥桶 / 讲台 / 唱片机 …）。
+     *
+     * <p>只盯<b>会吃掉手持物</b>的方块，不拦所有右键：铜钟交互就是右键方块，
+     * 一刀切会把占领玩法本身拦掉。</p>
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBreakerBlockInteract(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        Block block = event.getClickedBlock();
+        if (block == null || !CONSUMING_BLOCKS.contains(block.getType())) {
+            return;
+        }
+        ItemStack hand = event.getItem();
+        if (hand == null || SiegeBreakerManager.breakerTeamOf(hand) == null) {
+            return;
+        }
+        event.setCancelled(true);
+        event.getPlayer().sendActionBar(MINI.deserialize(
+                "<red>大将击破器不能被消耗 <gray>——它只用来破坏敌方天守阁"));
+    }
+
+    private GameRoom sengokuRoomOf(Player player) {
+        if (player == null) {
             return null;
         }
         GameRoom room = plugin.rooms().roomOf(player);

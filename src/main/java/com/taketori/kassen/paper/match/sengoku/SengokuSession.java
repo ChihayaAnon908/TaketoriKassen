@@ -40,6 +40,13 @@ public final class SengokuSession {
     private long roundStartedAt;
     /** 当前小局序号（1 起；平局重开时不推进，见 {@link SengokuScore#record}）。 */
     private int currentRound;
+    /**
+     * 本次 {@link #onRoundStart()} 是"平局重开同一局"而不是"新的一局"。
+     *
+     * <p>没有这个标记的话，平局重开会让局号自增——玩家看到「第 2 小局」但比分还是 0-0，
+     * 与 {@code SengokuScore} 刻意"平局不推进局数"的设计自相矛盾。</p>
+     */
+    private boolean replayingRound;
     /** 整场是否已结束（防止 ENDING 期间再来一次收尾）。 */
     private boolean finished;
     /** 管理员暂停：暂停期间小局计时不走。 */
@@ -60,7 +67,14 @@ public final class SengokuSession {
 
     /** 一小局开始：起小局计时、播报。由 {@code GameRoom.startPlay} 调用。 */
     public void onRoundStart() {
-        currentRound++;
+        if (!replayingRound) {
+            currentRound++;
+        }
+        replayingRound = false;
+        // 暂停状态不该跨局：管理员在暂停期间用击破器结束本局的话，
+        // 不复位就会让下一局的计时器直接死掉（tick 早退），直到管理员再 resume。
+        paused = false;
+        pausedAt = 0L;
         roundStartedAt = System.currentTimeMillis();
         finished = false;
         startTimer();
@@ -123,6 +137,8 @@ public final class SengokuSession {
         }
 
         // 还有下一局：清战场 → 重新进笼开局（队伍保留）
+        // 平局重开的是"同一局"，所以要让 onRoundStart 知道别自增局号
+        replayingRound = result.isDraw();
         room.resetSengokuBattlefield();
         String failure = room.restartRound();
         if (failure != null) {

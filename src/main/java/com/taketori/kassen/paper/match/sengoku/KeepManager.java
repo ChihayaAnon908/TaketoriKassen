@@ -59,10 +59,17 @@ public final class KeepManager {
     /**
      * 保护是否启用：配置开启 + 房间在跑。
      *
+     * <p>{@code keep.invulnerable} 与 {@code keep.protect-blocks} 两个键都要看：
+     * 前者是"天守阁本身不可攻陷"的总开关，后者是"要不要拦方块破坏与爆炸"。
+     * 关掉总开关就等于允许直接砸掉天守阁（用于调试或另类规则）。</p>
+     *
      * <p>不需要额外的"本局是否已被攻陷"判断——击破器读条完成会<b>立即结束本小局</b>，
      * 那时 {@code isRunning()} 已经变 false，保护自然失效。</p>
      */
     private boolean protectionEnabled() {
+        if (!plugin.config().sengokuRules().keepInvulnerable()) {
+            return false;
+        }
         if (!plugin.config().sengokuRules().protectKeepBlocks()) {
             return false;
         }

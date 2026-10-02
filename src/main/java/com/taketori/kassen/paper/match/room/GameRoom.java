@@ -1066,7 +1066,16 @@ public final class GameRoom {
         if (phase == Phase.PLAYING || phase == Phase.CAGED) {
             return "房间已经在对局中。";
         }
-        if (!arena.isReady()) {
+        // 就绪判定按模式分流：战国地图不必配月人刷新区与基地（那是 PVP/PVE 的要求），
+        // 反过来它有自己的七类点位。两套判定混用会出现「check 说齐全、开局却报缺月人刷新区」
+        // 或者「点位缺一半照样开局、小局主线永远走不通」。
+        if (isSengoku()) {
+            String sengokuMissing = arena.sengoku()
+                    .missingHint(plugin.config().towerRules().safeCount());
+            if (!sengokuMissing.isEmpty()) {
+                return "战国点位未就绪，还缺：" + sengokuMissing;
+            }
+        } else if (!arena.isReady()) {
             return "场地未就绪，还缺：" + arena.missingHint();
         }
         // 锁定名单：只取在线等待者；PVE 全红，PVP 沿用玩家在等待区手动选择的队伍
@@ -1360,8 +1369,10 @@ public final class GameRoom {
         startedAt = System.currentTimeMillis();
         endedAt = 0L;
 
-        // 战国模式：通知小局编排层开始本局计时 + 刷箭楼守卫与读条 + 起击破器判定
-        // （非战国房间不会创建它们）
+        // 战国模式：只跑自己的组件，刻意【不】启动月人、道具、基地占点与基地标记。
+        // 那一套会给对局分（addScore）并在达到 score-to-win 时调 finish()，
+        // 而战国模式的胜负只由击破器与超时决定——两套判定并存会让整场被提前结束；
+        // 月人刷新还会与中地小兵叠加成两套怪。非战国房间走原来的分支，一行不变。
         if (isSengoku()) {
             sengoku().onRoundStart();
             towers().start();
@@ -1369,22 +1380,27 @@ public final class GameRoom {
             siege().start();
             jumpPads().start();
             midMinions().start();
-        }
-
-        minions.start();
-        loot.start();
-        if (isPve()) {
-            baseCapture.stop();   // PVE 没有敌方基地要拆
-            baseMarker.stop();    // 也没有「双方基地」要标
-            String outpostError = outpost.start(plugin.pveSettings());
-            if (outpostError != null) {
-                plugin.getLogger().warning("[pve] 房间 " + id() + " 据点未能生成：" + outpostError);
-                broadcast("<yellow>据点未生成：<gray>" + outpostError);
-            }
-        } else {
-            baseCapture.start();
-            baseMarker.start();
+            minions.stop();
+            loot.stop();
+            baseCapture.stop();
+            baseMarker.stop();
             outpost.stop();
+        } else {
+            minions.start();
+            loot.start();
+            if (isPve()) {
+                baseCapture.stop();   // PVE 没有敌方基地要拆
+                baseMarker.stop();    // 也没有「双方基地」要标
+                String outpostError = outpost.start(plugin.pveSettings());
+                if (outpostError != null) {
+                    plugin.getLogger().warning("[pve] 房间 " + id() + " 据点未能生成：" + outpostError);
+                    broadcast("<yellow>据点未生成：<gray>" + outpostError);
+                }
+            } else {
+                baseCapture.start();
+                baseMarker.start();
+                outpost.stop();
+            }
         }
         board.updateAll();
 
@@ -1800,10 +1816,17 @@ public final class GameRoom {
      * @return 失败原因；成功返回 null
      */
     public String restartRound() {
+        // 关键：小局结束时 phase 还停在 PLAYING，而 beginMatch 的第一道门就是
+        // 「房间已经在对局中」。不退这一步，小局重开会【必然】失败——整场会在
+        // 第 1 小局结束时被当成平局收尾，三局两胜与逐局重置全部不可达。
+        // 同一个 tick 内马上会重新开局，不存在"外部看到空房"的窗口。
+        phase = Phase.WAITING;
         waiting.clear();
         for (UUID id : teams.keySet()) {
             Player player = Bukkit.getPlayer(id);
-            if (player != null && player.isOnline() && !plugin.spectator().isSpectator(player)) {
+            // 阵亡观战中的队员也要算进来：他们仍是本局参赛者，小局重开时应当一起回去。
+            // 漏掉的话 beginMatch 的名单锁定会把他们在 teams 里删掉（下一局少人 + 战绩丢失）。
+            if (player != null && player.isOnline()) {
                 waiting.add(id);
             }
         }
@@ -1820,16 +1843,12 @@ public final class GameRoom {
      * 这也是 {@code SengokuScore} 单独成类的原因。</p>
      */
     public void resetSengokuBattlefield() {
+        // stopComponents 里已经清过召唤物 / 掉落物 / 技能弹体，这里不再重复调用
+        // （那三个都是全实体扫描，重复两轮纯属浪费）
         stopComponents();
-        clearSummons();
-        clearDroppedItems();
-        clearSkillProjectiles();
-        // 背包里的击破器也要收掉：stopComponents 只清了掉在地上的那些，
-        // 而击破器的常态是"在某个人背包里"——漏掉就等于白送下一局一次攻陷机会
         if (sengokuSiege != null) {
             sengokuSiege.removeFromInventories();
         }
-        // 能量属于战场状态：每小局从零开始（跨局战绩才是不该动的那部分）
         if (sengokuEnergy != null) {
             sengokuEnergy.clearAll();
         }

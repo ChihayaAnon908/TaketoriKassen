@@ -387,6 +387,11 @@ public final class ArenaDef {
         }
         all.addAll(minionRegions.values());
         all.addAll(lootRegions.values());
+        // 战国专用区域（天守阁 / 箭楼 / 中地小兵）也算"对局区域"。
+        // 不并入的话有两个后果：① 玩家能在箭楼占领区与天守阁门前自由放置方块
+        // （把铜钟或击破器生成点围死），因为"对局中禁止破坏/放置"的判定只看 regions() 拼出的
+        // playBounds；② 丢在这些区域的物品不会被结算清理，跨小局残留。
+        all.addAll(sengoku.regions());
         return all;
     }
 

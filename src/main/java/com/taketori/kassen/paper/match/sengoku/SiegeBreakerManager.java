@@ -5,6 +5,7 @@ import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.core.match.sengoku.RoundResult;
 import com.taketori.kassen.core.match.sengoku.SiegeRules;
 import com.taketori.kassen.paper.item.PDCKeys;
+import com.taketori.kassen.paper.match.CuboidRegion;
 import com.taketori.kassen.paper.match.room.GameRoom;
 import com.taketori.kassen.paper.skill.SkillManager;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -265,7 +266,19 @@ public final class SiegeBreakerManager {
         }
         SiegeRules siege = rules();
         double need = siege.effectiveArmSeconds();
-        for (Player player : participants()) {
+
+        // 先清掉"已经不在场上"的携带者进度（阵亡进旁观 / 退出房间）。
+        // 不清的话，携带者死亡期间进度会原地保留、复活后接着读满——等于死亡没有惩罚，
+        // 也与设计文档「中断：离开范围 / 死亡 / 掉线 → 进度归零」不符。
+        java.util.Set<UUID> active = new java.util.HashSet<>();
+        List<Player> activePlayers = participants();
+        for (Player player : activePlayers) {
+            active.add(player.getUniqueId());
+        }
+        progress.keySet().removeIf(id -> !active.contains(id));
+        lastLeaveNotice.keySet().removeIf(id -> !active.contains(id));
+
+        for (Player player : activePlayers) {
             TeamId carrier = carriedBreakerTeam(player);
             if (carrier == null) {
                 progress.remove(player.getUniqueId());
@@ -278,13 +291,9 @@ public final class SiegeBreakerManager {
                         "<red>该角色无法操作大将击破器 <gray>——交给队友");
                 continue;
             }
-            Location keep = room.keep().keepCenter(carrier.opposite());
-            double radius = Math.max(0.5D, plugin.config().sengokuRules().keepArmRadius());
-            if (keep == null || keep.getWorld() == null
-                    || !keep.getWorld().equals(player.getWorld())
-                    || player.getLocation().distance(keep) > radius) {
+            if (!insideKeep(player, carrier.opposite())) {
                 progress.remove(player.getUniqueId());
-                noticeLeft(player, carrier, radius);
+                noticeLeft(player, carrier);
                 continue;
             }
 
@@ -315,7 +324,7 @@ public final class SiegeBreakerManager {
                 Math.max(0L, seconds)));
     }
 
-    private void noticeLeft(Player player, TeamId carrier, double radius) {
+    private void noticeLeft(Player player, TeamId carrier) {
         long now = System.currentTimeMillis();
         Long last = lastLeaveNotice.get(player.getUniqueId());
         if (last != null && now - last < 3000L) {
@@ -323,7 +332,37 @@ public final class SiegeBreakerManager {
         }
         lastLeaveNotice.put(player.getUniqueId(), now);
         room.scoreboard().actionBar(player, "<gray>带着击破器进入 " + carrier.opposite().display()
-                + " 天守阁 <white>" + (int) radius + "</white> 格内才能开始破坏");
+                + " 天守阁范围内才能开始破坏");
+    }
+
+    /**
+     * 玩家是否进到了某队天守阁的范围内。
+     *
+     * <p>判定口径是「<b>进入区域</b>」，不是「距区域中心 N 格」——后者有个致命退化：
+     * 天守阁区域一旦大于约 2N×2N，球心就落进建筑内部（甚至实心墙里），
+     * 玩家可能<b>永远读不满</b>；而门前点离中心近时又会退化成「蹲在门前一键攻陷」。</p>
+     *
+     * <p>{@code keep.arm-radius} 保留为<b>外扩容差</b>：区域边界常与墙体重合，
+     * 贴着墙站不该被判成"在外面"。</p>
+     */
+    private boolean insideKeep(Player player, TeamId team) {
+        var arena = room.arena();
+        if (arena == null) {
+            return false;
+        }
+        CuboidRegion keep = arena.sengoku().keep(team);
+        if (keep == null || keep.world() == null || !keep.world().equals(player.getWorld())) {
+            return false;
+        }
+        if (keep.contains(player.getLocation())) {
+            return true;
+        }
+        Location center = keep.center();
+        if (center == null) {
+            return false;
+        }
+        double tolerance = Math.max(0.5D, plugin.config().sengokuRules().keepArmRadius());
+        return player.getLocation().distance(center) <= tolerance;
     }
 
     private List<Player> participants() {
