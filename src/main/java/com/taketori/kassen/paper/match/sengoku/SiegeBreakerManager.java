@@ -118,6 +118,12 @@ public final class SiegeBreakerManager {
         // 落点校正：门前点 + 外推很容易把物品塞进墙里或悬空，玩家根本捡不到
         spot = SengokuSpots.onGround(spot);
         ItemStack stack = buildBreaker(team);
+        // one-per-team=false 时允许同时存在多枚，但 dropped 只能记住一个引用——
+        // 旧的那枚会从 stop() 的清理范围里漏掉（跨局残留）。所以发放前先收掉旧的。
+        Item previous = dropped.remove(team);
+        if (previous != null && previous.isValid()) {
+            previous.remove();
+        }
         Item item = spot.getWorld().dropItem(spot, stack);
         item.setUnlimitedLifetime(true);   // 需求：不可破坏，同时也不该自己消失
         item.setCanMobPickup(false);

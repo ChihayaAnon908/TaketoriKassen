@@ -103,9 +103,15 @@ public final class TowerManager {
 
     // ---------------------------------------------------------------- 归属查询
 
-    /** 箭楼总数（按配置）。 */
+    /**
+     * 箭楼总数。
+     *
+     * <p>运行中取实际建表的数量：{@code towers.count} 在 {@link #start()} 时快照进 Map，
+     * 若用现读配置，{@code /taketori reload} 改过 count 之后 {@code towers} 命令、
+     * 读条循环与跳跃台会各按各的数目说话。</p>
+     */
     public int towerCount() {
-        return rules().safeCount();
+        return towers.isEmpty() ? rules().safeCount() : towers.size();
     }
 
     /** 某座箭楼的归属；{@code null} = 中立。 */

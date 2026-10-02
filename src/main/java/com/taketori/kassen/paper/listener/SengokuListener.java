@@ -9,6 +9,7 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Item;
+import org.bukkit.entity.ItemFrame;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -25,7 +26,9 @@ import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
@@ -344,6 +347,27 @@ public final class SengokuListener implements Listener {
         event.setCancelled(true);
         event.getPlayer().sendActionBar(MINI.deserialize(
                 plugin.config().messages().plain("sengoku.breaker-unconsumable")));
+    }
+
+    /**
+     * 击破器不能被放进展示框——那是另一条"把物品交出去"的路径，
+     * 物品栏点击与拖拽护栏都看不到它。
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBreakerFrameInteract(PlayerInteractEntityEvent event) {
+        if (!(event.getRightClicked() instanceof ItemFrame)) {
+            return;
+        }
+        ItemStack hand = event.getPlayer().getInventory().getItem(event.getHand());
+        if (hand != null && SiegeBreakerManager.breakerTeamOf(hand) != null) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** 玩家退出时清掉提示节流记录，避免长期运行攒下无用条目。 */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onQuit(PlayerQuitEvent event) {
+        forget(event.getPlayer().getUniqueId());
     }
 
     private GameRoom sengokuRoomOf(Player player) {

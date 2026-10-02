@@ -25,7 +25,9 @@ siege-breaker:
   respawn-on-recapture: true
   # 允许操作击破器的角色 id；留空 = 所有职业都可以（默认全开）
   allowed-characters: [ ]
-  # 不可破坏：挡住火焰 / 爆炸 / 岩浆 / 仙人掌 / 虚空销毁
+  # 不可破坏：挡住火焰 / 爆炸 / 岩浆 / 仙人掌 / 信标消耗。
+  # ⚠ 虚空销毁拦不住——掉落物掉出世界是直接 discard，没有事件可拦；
+  #    所以生成点做了落点校正（见 SengokuSpots），避免它一开始就在边缘。
   indestructible: true
   # 不可丢弃：捡起来之后丢不掉，只能带着或死亡时掉落
   undroppable: true
