@@ -4,6 +4,8 @@ import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.character.CharacterDef;
 import com.taketori.kassen.core.character.CharacterManager;
 import com.taketori.kassen.core.match.PveSettings;
+import com.taketori.kassen.core.match.sengoku.SengokuMode;
+import com.taketori.kassen.core.match.sengoku.SengokuRules;
 import com.taketori.kassen.core.skill.SkillDef;
 import com.taketori.kassen.core.skill.SkillSlot;
 import com.taketori.kassen.core.skill.ThirdSlotTrigger;
@@ -40,6 +42,14 @@ public final class ConfigManager {
     private final WeaponManager weapons = new WeaponManager();
     private final CharacterManager characters = new CharacterManager();
     private final Messages messages = new Messages();
+
+    /**
+     * 战国 3v3 的对局骨架规则（{@code sengoku.yml}）。
+     *
+     * <p>缺文件或写坏时退回 {@link SengokuRules#defaults()}：战国模式仍能按默认值跑起来，
+     * 而 PVP / PVE 两条线根本不读它。</p>
+     */
+    private SengokuRules sengokuRules = SengokuRules.defaults();
 
     private int configVersion = 1;
     private boolean debug;
@@ -89,6 +99,8 @@ public final class ConfigManager {
         // messages.yml 回填默认键（新文案在旧文件里不存在时会显示成 "skill.xxx" 键名）；
         // weapons / characters 不回填，避免改动用户的数值文件
         messages.load(loadYaml("messages.yml", true));
+        // 战国模式的对局骨架：不覆盖玩家文件，缺失/写坏都退回默认值
+        parseSengoku(loadYaml("sengoku.yml", false));
 
         YamlConfiguration weaponYaml = loadYaml("weapons.yml", false);
         int templateVersion = weaponYaml.getInt("config-version", 1);
@@ -267,6 +279,55 @@ public final class ConfigManager {
             result.put(key, section.getDouble(key));
         }
         return result;
+    }
+
+    /**
+     * 解析 {@code sengoku.yml} 的对局骨架段。
+     *
+     * <p>逐项回退：整份文件缺失、某个段缺失、某个键写坏，都只影响那一项，其余照常读——
+     * 与武器配置"写错一个键不影响其它武器"的口径一致。</p>
+     */
+    private void parseSengoku(YamlConfiguration yaml) {
+        SengokuRules fallback = SengokuRules.defaults();
+        if (yaml == null) {
+            sengokuRules = fallback;
+            return;
+        }
+        ConfigurationSection rounds = yaml.getConfigurationSection("rounds");
+        ConfigurationSection keep = yaml.getConfigurationSection("keep");
+        SengokuRules.TimeoutWinner timeout = fallback.timeoutWinner();
+        if (rounds != null) {
+            String raw = rounds.getString("timeout-winner");
+            if (raw != null) {
+                timeout = "draw".equalsIgnoreCase(raw.trim())
+                        ? SengokuRules.TimeoutWinner.DRAW
+                        : SengokuRules.TimeoutWinner.TOWER_COUNT;
+            }
+        }
+        sengokuRules = new SengokuRules(
+                rounds == null ? fallback.bestOf()
+                        : rounds.getInt("best-of", fallback.bestOf()),
+                rounds == null ? fallback.timeLimitMinutes()
+                        : rounds.getInt("time-limit-minutes", fallback.timeLimitMinutes()),
+                timeout,
+                rounds == null ? fallback.keepStatsAcrossRounds()
+                        : rounds.getBoolean("keep-stats-across-rounds", fallback.keepStatsAcrossRounds()),
+                keep == null ? fallback.keepInvulnerable()
+                        : keep.getBoolean("invulnerable", fallback.keepInvulnerable()),
+                keep == null ? fallback.keepArmRadius()
+                        : keep.getDouble("arm-radius", fallback.keepArmRadius()),
+                keep == null ? fallback.protectKeepBlocks()
+                        : keep.getBoolean("protect-blocks", fallback.protectKeepBlocks()));
+    }
+
+    /** 战国模式的对局骨架规则（{@code sengoku.yml}）。 */
+    public SengokuRules sengokuRules() {
+        return sengokuRules;
+    }
+
+    /** 当前对局模式（config.yml 的 {@code match.mode}），认不出回退 PVP。 */
+    public SengokuMode matchMode() {
+        return SengokuMode.parse(plugin.getConfig().getString("match.mode", "pvp"), SengokuMode.PVP);
     }
 
     public WeaponManager weapons() {

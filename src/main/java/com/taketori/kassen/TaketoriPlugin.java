@@ -24,6 +24,7 @@ import com.taketori.kassen.paper.lobby.LobbyListener;
 import com.taketori.kassen.paper.lobby.LobbyManager;
 import com.taketori.kassen.paper.lobby.PlayerMenu;
 import com.taketori.kassen.paper.listener.PlayerListener;
+import com.taketori.kassen.paper.listener.SengokuListener;
 import com.taketori.kassen.paper.listener.SetupWandListener;
 import com.taketori.kassen.paper.listener.WeaponEditorListener;
 import com.taketori.kassen.paper.editor.WeaponEditor;
@@ -236,6 +237,8 @@ public final class TaketoriPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new CombatListener(this), this);
         getServer().getPluginManager().registerEvents(new ProjectileListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
+        // 战国 3v3：目前只做天守阁保护，后续阶段在这里挂铜钟 / 击破器 / 跳跃台
+        getServer().getPluginManager().registerEvents(new SengokuListener(this), this);
 
         var command = getCommand("taketori");
         if (command != null) {

@@ -268,6 +268,27 @@ public final class GameRoom {
     }
 
     /** 是否处于正式战斗阶段（组件 tick / 计分判定用）。 */
+    /** 战国模式的天守阁管理（懒加载：非战国房间永远不会创建它）。 */
+    private com.taketori.kassen.paper.match.sengoku.KeepManager sengokuKeep;
+
+    /**
+     * 本房间是否战国 3v3 模式。
+     *
+     * <p>当前取自全局 {@code config.yml} 的 {@code match.mode}；等 P0-3 把小局编排接进来后
+     * 会改成每房独立（与 {@code pve} 字段同一个口径）。</p>
+     */
+    public boolean isSengoku() {
+        return plugin.config().matchMode().isSengoku();
+    }
+
+    /** 战国模式的天守阁管理（懒加载）。 */
+    public com.taketori.kassen.paper.match.sengoku.KeepManager keep() {
+        if (sengokuKeep == null) {
+            sengokuKeep = new com.taketori.kassen.paper.match.sengoku.KeepManager(this);
+        }
+        return sengokuKeep;
+    }
+
     public boolean isRunning() {
         return phase == Phase.PLAYING;
     }

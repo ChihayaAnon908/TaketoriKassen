@@ -61,6 +61,10 @@ skill:
   grapple-miss: '<gray>钢丝落空。'
   boost-defly: '<yellow>已取消飞行状态（飞行时推进不会生效）'
   shockwave-none: '<gray>冲击波没有命中的目标（<white>{radius}</white> 格内没有敌人）'
+
+# ── 战国 3v3（三局两胜）──────────────────────────────────
+sengoku:
+  keep-protected: '<red>天守阁不可直接破坏 <gray>——用大将击破器'
   freeze-applied: '<aqua>已冻结 <white>{target}</white></aqua> <gray>{time}s'
 
 # BedWars 式多房间匹配：大厅 → 匹配 → 房间等待区 → 倒计时开局（玻璃笼）→ 结算回大厅
