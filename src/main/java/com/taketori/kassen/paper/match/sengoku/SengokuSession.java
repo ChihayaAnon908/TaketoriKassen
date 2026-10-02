@@ -42,6 +42,10 @@ public final class SengokuSession {
     private int currentRound;
     /** 整场是否已结束（防止 ENDING 期间再来一次收尾）。 */
     private boolean finished;
+    /** 管理员暂停：暂停期间小局计时不走。 */
+    private boolean paused;
+    /** 本次暂停的开始时刻（毫秒）；0 = 未暂停。 */
+    private long pausedAt;
 
     public SengokuSession(GameRoom room) {
         this.room = room;
@@ -143,7 +147,7 @@ public final class SengokuSession {
     }
 
     private void tick() {
-        if (finished || !room.isRunning()) {
+        if (finished || paused || !room.isRunning()) {
             return;
         }
         long limit = rules().timeLimitSeconds();
@@ -194,6 +198,34 @@ public final class SengokuSession {
 
     public boolean isFinished() {
         return finished;
+    }
+
+    // ---------------------------------------------------------------- 管理员暂停
+
+    /**
+     * 暂停 / 继续。
+     *
+     * <p>暂停期间小局计时停走；继续时把起始时刻整体往后推，所以"暂停 5 分钟"
+     * 不会吃掉这 5 分钟的局内时间（否则管理员一暂停就可能直接判超时）。</p>
+     *
+     * @return 状态是否发生了变化
+     */
+    public boolean setPaused(boolean value) {
+        if (finished || paused == value) {
+            return false;
+        }
+        paused = value;
+        if (value) {
+            pausedAt = System.currentTimeMillis();
+        } else if (pausedAt > 0L) {
+            roundStartedAt += System.currentTimeMillis() - pausedAt;
+            pausedAt = 0L;
+        }
+        return true;
+    }
+
+    public boolean isPaused() {
+        return paused;
     }
 
     /** 房间结束/销毁时停掉计时器。 */

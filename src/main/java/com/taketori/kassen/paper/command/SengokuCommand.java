@@ -1,0 +1,465 @@
+package com.taketori.kassen.paper.command;
+
+import com.taketori.kassen.TaketoriPlugin;
+import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.core.match.sengoku.RoundResult;
+import com.taketori.kassen.paper.match.ArenaDef;
+import com.taketori.kassen.paper.match.CuboidRegion;
+import com.taketori.kassen.paper.match.room.GameRoom;
+import com.taketori.kassen.paper.match.sengoku.SengokuMapDef;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import org.bukkit.Location;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * {@code /taketori sengoku ...}：战国 3v3 的划区与运维命令。
+ *
+ * <p>分两类：</p>
+ * <ul>
+ *   <li><b>划区</b>（{@code setkeep} / {@code settower} / …）：消费选区锄的当前选区
+ *       （区域类）或玩家站的位置（点类），写入 {@code arenas.yml} 的 {@code sengoku} 段；</li>
+ *   <li><b>运维</b>（{@code start} / {@code pause} / {@code endround} / {@code towers} / …）。</li>
+ * </ul>
+ *
+ * <p>独立成一个类而不是塞进 {@code MatchCommand}（已 1300 多行）：这一组命令只服务一个模式，
+ * 混进去之后那个类会越来越难读。</p>
+ */
+public final class SengokuCommand {
+
+    private static final MiniMessage MINI = MiniMessage.miniMessage();
+
+    private final TaketoriPlugin plugin;
+
+    public SengokuCommand(TaketoriPlugin plugin) {
+        this.plugin = plugin;
+    }
+
+    public void handle(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("taketori.admin")) {
+            send(sender, "<red>没有权限。");
+            return;
+        }
+        if (args.length < 2) {
+            usage(sender);
+            return;
+        }
+        String action = args[1].toLowerCase(Locale.ROOT);
+        switch (action) {
+            // ── 划区 ──────────────────────────────────────────────
+            case "setkeep" -> setKeep(sender, args);
+            case "setkeepdoor" -> setKeepDoor(sender, args);
+            case "settower" -> setTower(sender, args);
+            case "setbell" -> setBell(sender, args);
+            case "setguard" -> setGuard(sender, args);
+            case "setmid" -> setMidMinion(sender, args);
+            case "setjumppad" -> setJumpPad(sender, args);
+            // ── 运维 ──────────────────────────────────────────────
+            case "start" -> forceStart(sender);
+            case "pause" -> setPaused(sender, true);
+            case "resume" -> setPaused(sender, false);
+            case "endround" -> endRound(sender, args);
+            case "nextround" -> endRound(sender, args);
+            case "towers" -> showTowers(sender);
+            case "breaker" -> showBreaker(sender, args);
+            case "jumppad" -> showJumpPad(sender, args);
+            case "score" -> showScore(sender);
+            case "check" -> checkMap(sender);
+            default -> usage(sender);
+        }
+    }
+
+    // ---------------------------------------------------------------- 划区
+
+    private void setKeep(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        TeamId team = requireTeam(sender, args, 2);
+        if (team == null) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        CuboidRegion selection = requireSelection(sender, player);
+        if (def == null || selection == null) {
+            return;
+        }
+        def.sengoku().setKeep(team, selection);
+        afterEdit(sender, player, def, team.display() + "天守阁", selection.describe());
+    }
+
+    private void setKeepDoor(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        TeamId team = requireTeam(sender, args, 2);
+        if (team == null) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        Location spot = player.getLocation();
+        def.sengoku().setKeepDoor(team, ArenaDef.Point.of(spot));
+        afterEdit(sender, player, def, team.display() + "天守阁门前", describe(spot));
+    }
+
+    private void setTower(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        int index = requireIndex(sender, args, 2, SengokuMapDef.MAX_TOWERS, "箭楼");
+        if (index < 0) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        CuboidRegion selection = requireSelection(sender, player);
+        if (def == null || selection == null) {
+            return;
+        }
+        // 只覆盖占领区，保留已有的铜钟与守卫点（分三条命令设，允许先划区后补点）
+        var map = def.sengoku();
+        map.setTower(index, selection, map.bell(index), map.guardSpawn(index));
+        afterEdit(sender, player, def, "箭楼 #" + index + " 占领区", selection.describe());
+    }
+
+    private void setBell(CommandSender sender, String[] args) {
+        setTowerPoint(sender, args, true);
+    }
+
+    private void setGuard(CommandSender sender, String[] args) {
+        setTowerPoint(sender, args, false);
+    }
+
+    /** 铜钟与守卫点都是"箭楼上的一个位置"，只是字段不同。 */
+    private void setTowerPoint(CommandSender sender, String[] args, boolean bell) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        int index = requireIndex(sender, args, 2, SengokuMapDef.MAX_TOWERS, bell ? "铜钟" : "守卫点");
+        if (index < 0) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        var map = def.sengoku();
+        ArenaDef.Point point = ArenaDef.Point.of(player.getLocation());
+        if (bell) {
+            map.setTower(index, map.tower(index), point, map.guardSpawn(index));
+        } else {
+            map.setTower(index, map.tower(index), map.bell(index), point);
+        }
+        afterEdit(sender, player, def, "箭楼 #" + index + (bell ? " 铜钟" : " 守卫刷新点"),
+                describe(player.getLocation()));
+    }
+
+    private void setMidMinion(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        CuboidRegion selection = requireSelection(sender, player);
+        if (def == null || selection == null) {
+            return;
+        }
+        int index = def.sengoku().nextFreeMidMinionIndex();
+        if (args.length >= 3) {
+            int explicit = requireIndex(sender, args, 2, SengokuMapDef.MAX_MID_MINION_REGIONS, "中地小兵区");
+            if (explicit < 0) {
+                return;
+            }
+            index = explicit;
+        }
+        if (index <= 0) {
+            send(sender, "<red>中地小兵刷新区已配满（上限 " + SengokuMapDef.MAX_MID_MINION_REGIONS + "）。");
+            return;
+        }
+        def.sengoku().setMidMinionRegion(index, selection);
+        afterEdit(sender, player, def, "中地小兵刷新区 #" + index, selection.describe());
+    }
+
+    private void setJumpPad(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        TeamId team = requireTeam(sender, args, 2);
+        if (team == null) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        def.sengoku().setJumpPad(team, ArenaDef.Point.of(player.getLocation()));
+        afterEdit(sender, player, def, team.display() + "跳跃台", describe(player.getLocation()));
+    }
+
+    /** 点位写完之后统一做的事：保存、清选区、回报、刷新缺口清单。 */
+    private void afterEdit(CommandSender sender, Player player, ArenaDef def, String what, String detail) {
+        plugin.arena().save();
+        plugin.arena().clearSelection(player.getUniqueId());
+        send(sender, "<green>[" + def.id() + "] " + what + " 已设置：<white>" + detail);
+        int required = plugin.config().towerRules().safeCount();
+        String missing = def.sengoku().missingHint(required);
+        send(sender, missing.isEmpty()
+                ? "<green>战国点位已齐全，可以开局。"
+                : "<gray>还缺：<white>" + missing);
+    }
+
+    // ---------------------------------------------------------------- 运维
+
+    private void forceStart(CommandSender sender) {
+        GameRoom room = requireSengokuRoom(sender);
+        if (room == null) {
+            return;
+        }
+        String failure = room.beginMatch(true);
+        send(sender, failure == null
+                ? "<green>已强制开局。"
+                : "<red>开局失败：<white>" + failure);
+    }
+
+    private void setPaused(CommandSender sender, boolean paused) {
+        GameRoom room = requireSengokuRoom(sender);
+        if (room == null) {
+            return;
+        }
+        if (!room.sengoku().setPaused(paused)) {
+            send(sender, "<gray>已经是" + (paused ? "暂停" : "进行") + "状态。");
+            return;
+        }
+        room.broadcast(paused ? "<yellow>对局已由管理员暂停" : "<green>对局已继续");
+        send(sender, paused ? "<green>已暂停小局计时。" : "<green>已继续。");
+    }
+
+    private void endRound(CommandSender sender, String[] args) {
+        GameRoom room = requireSengokuRoom(sender);
+        if (room == null) {
+            return;
+        }
+        if (!room.isRunning()) {
+            send(sender, "<red>当前不在小局进行中。");
+            return;
+        }
+        TeamId winner = args.length >= 3 ? TeamId.byName(args[2]) : null;
+        RoundResult result = winner == null
+                ? RoundResult.draw(RoundResult.Reason.FORCED, room.elapsedSeconds())
+                : new RoundResult(winner, RoundResult.Reason.FORCED, room.elapsedSeconds());
+        send(sender, winner == null
+                ? "<green>已强制结束本小局（平局重开）。"
+                : "<green>已强制结束本小局，判 <white>" + winner.display() + "</white> 胜。");
+        room.sengoku().onRoundEnd(result);
+    }
+
+    private void showTowers(CommandSender sender) {
+        GameRoom room = requireSengokuRoom(sender);
+        if (room == null) {
+            return;
+        }
+        var towers = room.towers();
+        send(sender, "<gold>箭楼归属：<white>" + towers.describe());
+        for (int index = 1; index <= towers.towerCount(); index++) {
+            send(sender, "<gray>  #" + index
+                    + " 归属 " + (towers.ownerOf(index) == null ? "中立" : towers.ownerOf(index).display())
+                    + "｜守卫 " + towers.guardCount(index)
+                    + "｜读条中 " + (room.towerCapture().isArmed(index) ? "是" : "否")
+                    + "｜红 " + Math.round(room.towerCapture().progressOf(index, TeamId.RED))
+                    + "s / 蓝 " + Math.round(room.towerCapture().progressOf(index, TeamId.BLUE)) + "s");
+        }
+    }
+
+    private void showBreaker(CommandSender sender, String[] args) {
+        GameRoom room = requireSengokuRoom(sender);
+        if (room == null) {
+            return;
+        }
+        for (TeamId team : TeamId.values()) {
+            if (args.length >= 3 && TeamId.byName(args[2]) != team) {
+                continue;
+            }
+            send(sender, "<gray>" + team.display() + " 的击破器：<white>" + room.siege().describe(team));
+        }
+        if (sender instanceof Player player) {
+            send(sender, "<gray>你的读条进度：<white>"
+                    + Math.round(room.siege().progressOf(player)) + " 秒");
+        }
+    }
+
+    private void showJumpPad(CommandSender sender, String[] args) {
+        GameRoom room = requireSengokuRoom(sender);
+        if (room == null) {
+            return;
+        }
+        for (TeamId team : TeamId.values()) {
+            if (args.length >= 3 && TeamId.byName(args[2]) != team) {
+                continue;
+            }
+            Location pad = room.jumpPads().padLocation(team);
+            send(sender, "<gray>" + team.display() + " 跳跃台：<white>"
+                    + (room.jumpPads().isActive(team) ? "已激活" : "未激活")
+                    + (pad == null ? "（未配置点位）" : " @ " + describe(pad)));
+        }
+    }
+
+    private void showScore(CommandSender sender) {
+        GameRoom room = requireSengokuRoom(sender);
+        if (room == null) {
+            return;
+        }
+        var session = room.sengoku();
+        send(sender, "<gold>第 " + Math.max(1, session.currentRound()) + " 小局"
+                + "｜比分 <white>" + session.display()
+                + "</white>｜" + (session.isPaused() ? "<yellow>已暂停" : "<green>进行中")
+                + (session.isFinished() ? " <red>（整场已结束）" : ""));
+        long left = session.remainingSeconds();
+        send(sender, "<gray>本局剩余：<white>"
+                + (left < 0L ? "不限时" : left / 60L + " 分 " + left % 60L + " 秒"));
+        send(sender, "<gray>中地小兵：<white>" + room.midMinions().aliveCount()
+                + "/" + plugin.config().midMinionRules().safeMaxAlive());
+        for (TeamId team : TeamId.values()) {
+            for (Player player : room.teamPlayers(team)) {
+                send(sender, "<gray>  " + team.colorTag() + player.getName()
+                        + "</gray> 能量 <white>" + room.energy().energyOf(player)
+                        + "/" + plugin.config().energyRules().safeMax());
+            }
+        }
+    }
+
+    private void checkMap(CommandSender sender) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        int required = plugin.config().towerRules().safeCount();
+        String missing = def.sengoku().missingHint(required);
+        send(sender, "<gold>[" + def.id() + "] 战国点位：" + def.sengoku().describe());
+        send(sender, missing.isEmpty()
+                ? "<green>齐全，可以开局。"
+                : "<red>还缺：<white>" + missing);
+    }
+
+    // ---------------------------------------------------------------- 参数助手
+
+    private Player requirePlayer(CommandSender sender) {
+        if (sender instanceof Player player) {
+            return player;
+        }
+        send(sender, "<red>这条命令只能由玩家执行（要用到位置或选区）。");
+        return null;
+    }
+
+    private TeamId requireTeam(CommandSender sender, String[] args, int position) {
+        if (args.length <= position) {
+            send(sender, "<red>要指定队伍：<white>red</white> 或 <white>blue</white>。");
+            return null;
+        }
+        TeamId team = TeamId.byName(args[position]);
+        if (team == null) {
+            send(sender, "<red>队伍只能是 <white>red</white> 或 <white>blue</white>，收到的是 <white>"
+                    + args[position] + "</white>。");
+        }
+        return team;
+    }
+
+    private int requireIndex(CommandSender sender, String[] args, int position, int max, String what) {
+        if (args.length <= position) {
+            send(sender, "<red>要指定" + what + "编号（1.." + max + "）。");
+            return -1;
+        }
+        try {
+            int index = Integer.parseInt(args[position]);
+            if (index < 1 || index > max) {
+                send(sender, "<red>" + what + "编号要在 1.." + max + " 之间，收到 <white>" + index + "</white>。");
+                return -1;
+            }
+            return index;
+        } catch (NumberFormatException ex) {
+            send(sender, "<red>" + what + "编号不是整数：<white>" + args[position] + "</white>。");
+            return -1;
+        }
+    }
+
+    private ArenaDef requireArena(CommandSender sender, Player player) {
+        ArenaDef def = plugin.arena().selected(player.getUniqueId());
+        if (def == null) {
+            send(sender, "<red>还没有选中场地。先 <white>/taketori arena setup <id> [模板名]</white>。");
+        }
+        return def;
+    }
+
+    private CuboidRegion requireSelection(CommandSender sender, Player player) {
+        CuboidRegion region = plugin.arena().selection(player.getUniqueId());
+        if (region == null) {
+            send(sender, "<red>选区不完整：<white>" + plugin.arena().selectionStatus(player.getUniqueId()));
+            send(sender, "<gray>站在一角 → <white>/taketori arena pos1</white>；走到对角 → "
+                    + "<white>/taketori arena pos2</white>；再执行本条指令。");
+        }
+        return region;
+    }
+
+    private GameRoom requireSengokuRoom(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            send(sender, "<red>这条命令只能由玩家在战国房间里执行。");
+            return null;
+        }
+        GameRoom room = plugin.rooms().roomOf(player);
+        if (room == null || !room.isSengoku()) {
+            send(sender, "<red>你不在战国 3v3 房间里。");
+            return null;
+        }
+        return room;
+    }
+
+    private String describe(Location location) {
+        return location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ();
+    }
+
+    private void send(CommandSender sender, String miniMessage) {
+        Component component = MINI.deserialize(miniMessage);
+        sender.sendMessage(component);
+    }
+
+    private void usage(CommandSender sender) {
+        send(sender, "<gold>/taketori sengoku <grey>—— 战国 3v3（三局两胜）");
+        send(sender, "<yellow>划区<gray>（先选中场地；区域类用 pos1/pos2，点类站在位置上）：");
+        for (String line : List.of(
+                "setkeep <red|blue>      天守阁区域",
+                "setkeepdoor <red|blue>  天守阁门前点（击破器与跳跃台的生成位置）",
+                "settower <序号>         箭楼占领区",
+                "setbell <序号>          箭楼铜钟位置",
+                "setguard <序号>         箭楼守卫刷新点",
+                "setmid [序号]           中地小兵刷新区",
+                "setjumppad <red|blue>   跳跃台位置")) {
+            send(sender, "<gray>  " + line);
+        }
+        send(sender, "<yellow>运维<gray>（在战国房间内执行）：");
+        for (String line : List.of(
+                "start                   强制开局",
+                "pause | resume          暂停 / 继续小局计时",
+                "endround [red|blue]     强制结束本小局（可指定胜方）",
+                "towers                  查看箭楼归属与读条",
+                "breaker [red|blue]      查看击破器位置",
+                "jumppad [red|blue]      查看跳跃台状态",
+                "score                   查看比分与各人能量",
+                "check                   检查本场地点位是否齐全")) {
+            send(sender, "<gray>  " + line);
+        }
+    }
+}
