@@ -283,6 +283,9 @@ public final class GameRoom {
     /** 战国模式的大将击破器（懒加载）。 */
     private com.taketori.kassen.paper.match.sengoku.SiegeBreakerManager sengokuSiege;
 
+    /** 战国模式的跳跃台（懒加载）。 */
+    private com.taketori.kassen.paper.match.sengoku.JumpPadManager sengokuJumpPads;
+
     /**
      * 本房间是否战国 3v3 模式。
      *
@@ -331,6 +334,14 @@ public final class GameRoom {
             sengokuSiege = new com.taketori.kassen.paper.match.sengoku.SiegeBreakerManager(this);
         }
         return sengokuSiege;
+    }
+
+    /** 战国模式的跳跃台（懒加载）。 */
+    public com.taketori.kassen.paper.match.sengoku.JumpPadManager jumpPads() {
+        if (sengokuJumpPads == null) {
+            sengokuJumpPads = new com.taketori.kassen.paper.match.sengoku.JumpPadManager(this);
+        }
+        return sengokuJumpPads;
     }
 
     public boolean isRunning() {
@@ -1317,6 +1328,7 @@ public final class GameRoom {
             towers().start();
             towerCapture().start();
             siege().start();
+            jumpPads().start();
         }
 
         minions.start();
@@ -1580,6 +1592,9 @@ public final class GameRoom {
         }
         if (sengokuSiege != null) {
             sengokuSiege.stop();
+        }
+        if (sengokuJumpPads != null) {
+            sengokuJumpPads.stop();
         }
     }
 
