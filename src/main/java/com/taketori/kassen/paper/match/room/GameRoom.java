@@ -280,6 +280,9 @@ public final class GameRoom {
     /** 战国模式的箭楼占领读条（懒加载）。 */
     private com.taketori.kassen.paper.match.sengoku.TowerCaptureManager sengokuCapture;
 
+    /** 战国模式的大将击破器（懒加载）。 */
+    private com.taketori.kassen.paper.match.sengoku.SiegeBreakerManager sengokuSiege;
+
     /**
      * 本房间是否战国 3v3 模式。
      *
@@ -320,6 +323,14 @@ public final class GameRoom {
             sengokuCapture = new com.taketori.kassen.paper.match.sengoku.TowerCaptureManager(this);
         }
         return sengokuCapture;
+    }
+
+    /** 战国模式的大将击破器（懒加载）。 */
+    public com.taketori.kassen.paper.match.sengoku.SiegeBreakerManager siege() {
+        if (sengokuSiege == null) {
+            sengokuSiege = new com.taketori.kassen.paper.match.sengoku.SiegeBreakerManager(this);
+        }
+        return sengokuSiege;
     }
 
     public boolean isRunning() {
@@ -1299,11 +1310,13 @@ public final class GameRoom {
         startedAt = System.currentTimeMillis();
         endedAt = 0L;
 
-        // 战国模式：通知小局编排层开始本局计时 + 刷箭楼守卫与读条（非战国房间不会创建它们）
+        // 战国模式：通知小局编排层开始本局计时 + 刷箭楼守卫与读条 + 起击破器判定
+        // （非战国房间不会创建它们）
         if (isSengoku()) {
             sengoku().onRoundStart();
             towers().start();
             towerCapture().start();
+            siege().start();
         }
 
         minions.start();
@@ -1564,6 +1577,9 @@ public final class GameRoom {
         }
         if (sengokuCapture != null) {
             sengokuCapture.stop();
+        }
+        if (sengokuSiege != null) {
+            sengokuSiege.stop();
         }
     }
 

@@ -71,6 +71,15 @@ public final class PDCKeys {
      */
     private static NamespacedKey towerGuardIndex;
 
+    /**
+     * 大将击破器的归属队伍（red / blue）。
+     *
+     * <p>与武器的 {@code soulbound} 是两套语义：那边按<b>个人</b>归属（谁绑的谁能用），
+     * 这边按<b>队伍</b>归属——队友都能捡、敌方捡不走。所以不能复用武器身份，
+     * 否则击破器会被当成"某个人的武器"。</p>
+     */
+    private static NamespacedKey sengokuBreakerTeam;
+
     private PDCKeys() {
     }
 
@@ -111,6 +120,7 @@ public final class PDCKeys {
 
         summonedOwner = new NamespacedKey(plugin, "summoned_owner");
         towerGuardIndex = new NamespacedKey(plugin, "tower_guard_index");
+        sengokuBreakerTeam = new NamespacedKey(plugin, "sengoku_breaker_team");
 
         projEchoBonus = new NamespacedKey(plugin, "proj_echo_bonus");
         projMarkBonus = new NamespacedKey(plugin, "proj_mark_bonus");
@@ -288,5 +298,10 @@ public final class PDCKeys {
     /** 箭楼守卫所属的箭楼序号。 */
     public static NamespacedKey towerGuardIndex() {
         return towerGuardIndex;
+    }
+
+    /** 大将击破器的归属队伍。 */
+    public static NamespacedKey sengokuBreakerTeam() {
+        return sengokuBreakerTeam;
     }
 }

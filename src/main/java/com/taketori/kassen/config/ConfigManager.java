@@ -6,6 +6,7 @@ import com.taketori.kassen.core.character.CharacterManager;
 import com.taketori.kassen.core.match.PveSettings;
 import com.taketori.kassen.core.match.sengoku.SengokuMode;
 import com.taketori.kassen.core.match.sengoku.SengokuRules;
+import com.taketori.kassen.core.match.sengoku.SiegeRules;
 import com.taketori.kassen.core.match.sengoku.TowerRules;
 import com.taketori.kassen.core.skill.SkillDef;
 import com.taketori.kassen.core.skill.SkillSlot;
@@ -54,6 +55,9 @@ public final class ConfigManager {
 
     /** 战国模式的箭楼规则（{@code sengoku-towers.yml}）。 */
     private TowerRules towerRules = TowerRules.defaults();
+
+    /** 战国模式的击破器与跳跃台规则（{@code sengoku-siege.yml}）。 */
+    private SiegeRules siegeRules = SiegeRules.defaults();
 
     private int configVersion = 1;
     private boolean debug;
@@ -106,6 +110,7 @@ public final class ConfigManager {
         // 战国模式的对局骨架：不覆盖玩家文件，缺失/写坏都退回默认值
         parseSengoku(loadYaml("sengoku.yml", false));
         parseTowers(loadYaml("sengoku-towers.yml", false));
+        parseSiege(loadYaml("sengoku-siege.yml", false));
 
         YamlConfiguration weaponYaml = loadYaml("weapons.yml", false);
         int templateVersion = weaponYaml.getInt("config-version", 1);
@@ -387,6 +392,60 @@ public final class ConfigManager {
     /** 战国模式的箭楼规则（{@code sengoku-towers.yml}）。 */
     public TowerRules towerRules() {
         return towerRules;
+    }
+
+    /** 解析 {@code sengoku-siege.yml}；逐项回退，与前两份同口径。 */
+    private void parseSiege(YamlConfiguration yaml) {
+        SiegeRules fallback = SiegeRules.defaults();
+        if (yaml == null) {
+            siegeRules = fallback;
+            return;
+        }
+        ConfigurationSection breaker = yaml.getConfigurationSection("siege-breaker");
+        ConfigurationSection pad = yaml.getConfigurationSection("jump-pad");
+        ConfigurationSection launch = pad == null ? null : pad.getConfigurationSection("launch");
+        SiegeRules.JumpPadSpec padFallback = fallback.jumpPad();
+        SiegeRules.JumpPadSpec padSpec = new SiegeRules.JumpPadSpec(
+                pad == null ? padFallback.mode() : pad.getString("mode", padFallback.mode()),
+                pad == null ? padFallback.target() : pad.getString("target", padFallback.target()),
+                pad == null ? padFallback.specifiedTower()
+                        : pad.getInt("specified-tower", padFallback.specifiedTower()),
+                pad == null ? padFallback.cooldownSeconds()
+                        : pad.getInt("cooldown-seconds", padFallback.cooldownSeconds()),
+                launch == null ? padFallback.power() : launch.getDouble("power", padFallback.power()),
+                launch == null ? padFallback.upward() : launch.getDouble("upward", padFallback.upward()),
+                pad == null ? padFallback.fallImmunityTicks()
+                        : pad.getInt("fall-immunity-ticks", padFallback.fallImmunityTicks()),
+                pad == null ? padFallback.particle() : pad.getString("particle", padFallback.particle()),
+                pad == null ? padFallback.sound() : pad.getString("sound", padFallback.sound()),
+                pad == null ? padFallback.resistanceTicks()
+                        : pad.getInt("resistance-ticks", padFallback.resistanceTicks()));
+        siegeRules = new SiegeRules(
+                breaker == null ? fallback.material() : breaker.getString("material", fallback.material()),
+                breaker == null ? fallback.display() : breaker.getString("name", fallback.display()),
+                breaker == null ? fallback.glow() : breaker.getBoolean("glow", fallback.glow()),
+                breaker == null ? fallback.spawnDistanceFromKeep()
+                        : breaker.getDouble("spawn-distance-from-keep", fallback.spawnDistanceFromKeep()),
+                breaker == null ? fallback.pickRadius()
+                        : breaker.getDouble("pick-radius", fallback.pickRadius()),
+                breaker == null ? fallback.armTimeSeconds()
+                        : breaker.getDouble("arm-time-seconds", fallback.armTimeSeconds()),
+                breaker == null ? fallback.onePerTeam()
+                        : breaker.getBoolean("one-per-team", fallback.onePerTeam()),
+                breaker == null ? fallback.respawnOnRecapture()
+                        : breaker.getBoolean("respawn-on-recapture", fallback.respawnOnRecapture()),
+                breaker == null ? fallback.allowedCharacters()
+                        : breaker.getStringList("allowed-characters"),
+                breaker == null ? fallback.indestructible()
+                        : breaker.getBoolean("indestructible", fallback.indestructible()),
+                breaker == null ? fallback.undroppable()
+                        : breaker.getBoolean("undroppable", fallback.undroppable()),
+                padSpec);
+    }
+
+    /** 战国模式的击破器与跳跃台规则（{@code sengoku-siege.yml}）。 */
+    public SiegeRules siegeRules() {
+        return siegeRules;
     }
 
     /** 当前对局模式（config.yml 的 {@code match.mode}），认不出回退 PVP。 */

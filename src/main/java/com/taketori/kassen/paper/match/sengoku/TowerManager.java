@@ -202,16 +202,18 @@ public final class TowerManager {
     }
 
     /**
-     * 占领后的连锁效果。
+     * 占领后的连锁效果：在<b>敌方</b>天守阁门前生成大将击破器。
      *
-     * <p>P2 会在这里生成敌方的「大将击破器」与己方的「跳跃台」。当前只留钩子，
-     * 避免先把逻辑写进 P1 再拆出来。</p>
+     * <p>不需要额外的"重新占领才生成"判断——{@link SiegeBreakerManager#ensureBreaker} 本身是
+     * 幂等的（已有就不重复给），所以反复占领同一座箭楼不会刷出多余物件，
+     * 而击破器被消耗掉之后再占领会自动补齐。</p>
      */
     private void onCaptured(int index, TeamId team) {
         var session = room.isSengoku() ? room.sengoku() : null;
         if (session != null && session.isFinished()) {
             return;   // 整场已结束，不再产生新的攻城件
         }
+        room.siege().ensureBreaker(team);
     }
 
     // ---------------------------------------------------------------- tick

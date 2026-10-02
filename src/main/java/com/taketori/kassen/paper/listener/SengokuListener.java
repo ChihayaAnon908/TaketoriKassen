@@ -3,9 +3,11 @@ package com.taketori.kassen.paper.listener;
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.paper.match.room.GameRoom;
+import com.taketori.kassen.paper.match.sengoku.SiegeBreakerManager;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -13,8 +15,15 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.entity.ItemDespawnEvent;
+import org.bukkit.event.inventory.InventoryAction;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
 import java.util.Map;
@@ -142,8 +151,102 @@ public final class SengokuListener implements Listener {
         return -1;
     }
 
-    private GameRoom sengokuRoomOf(Player player) {
-        if (player == null) {
+    // ── 大将击破器的三条护栏：不可被抢 / 不可丢弃 / 不可破坏 ──────────────
+    // 与武器的 soulbound 护栏同规则，但按【队伍】判定（队友都能捡、敌方捡不走），
+    // 所以没有复用 CarrierGuardListener 的个人归属判定。
+
+    /** 只有击破器归属的队伍能捡；不在房间里的玩家也拿不走。 */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBreakerPickup(EntityPickupItemEvent event) {
+        if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+        TeamId owner = SiegeBreakerManager.breakerTeamOf(event.getItem().getItemStack());
+        if (owner == null) {
+            return;
+        }
+        GameRoom room = sengokuRoomOf(player);
+        if (room == null) {
+            event.setCancelled(true);
+            return;
+        }
+        if (room.teamOf(player.getUniqueId()) != owner) {
+            event.setCancelled(true);
+            player.sendActionBar(MINI.deserialize("<red>这是 " + owner.display() + " 的击破器"));
+        }
+    }
+
+    /** 捡起来之后丢不掉（只能带着，或阵亡时掉落）。 */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBreakerDrop(PlayerDropItemEvent event) {
+        if (!plugin.config().siegeRules().undroppable()) {
+            return;
+        }
+        if (SiegeBreakerManager.breakerTeamOf(event.getItemDrop().getItemStack()) == null) {
+            return;
+        }
+        event.setCancelled(true);
+        event.getPlayer().sendActionBar(MINI.deserialize(
+                "<red>大将击破器不能丢弃 <gray>——只能带着，或阵亡时掉落"));
+    }
+
+    /** 掉落在地上的击破器不可被破坏（火焰 / 爆炸 / 岩浆 / 仙人掌 / 攻击）。 */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBreakerDamage(EntityDamageEvent event) {
+        if (!plugin.config().siegeRules().indestructible()) {
+            return;
+        }
+        if (!(event.getEntity() instanceof Item item)) {
+            return;
+        }
+        if (SiegeBreakerManager.breakerTeamOf(item.getItemStack()) != null) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** 击破器不会因为"存在太久"而自然消失。 */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBreakerDespawn(ItemDespawnEvent event) {
+        if (!plugin.config().siegeRules().indestructible()) {
+            return;
+        }
+        if (SiegeBreakerManager.breakerTeamOf(event.getEntity().getItemStack()) != null) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** 击破器不能塞进容器（防止转手 / 藏起来）。 */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBreakerInventoryClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
+        }
+        var top = event.getView().getTopInventory();
+        if (top.getHolder() instanceof org.bukkit.inventory.PlayerInventory) {
+            return;   // 在自己背包里整理不算
+        }
+        if (breakerInvolved(event, player)) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** 这次点击有没有牵涉击破器（光标 / 当前格 / 快捷栏交换三条路径）。 */
+    private boolean breakerInvolved(InventoryClickEvent event, Player player) {
+        if (SiegeBreakerManager.breakerTeamOf(event.getCurrentItem()) != null
+                || SiegeBreakerManager.breakerTeamOf(event.getCursor()) != null) {
+            return true;
+        }
+        if (event.getAction() == InventoryAction.HOTBAR_SWAP) {
+            int button = event.getHotbarButton();
+            ItemStack hotbar = button >= 0
+                    ? player.getInventory().getItem(button)
+                    : player.getInventory().getItemInOffHand();
+            return SiegeBreakerManager.breakerTeamOf(hotbar) != null;
+        }
+        return false;
+    }
+
+    private GameRoom sengokuRoomOf(Player player) {        if (player == null) {
             return null;
         }
         GameRoom room = plugin.rooms().roomOf(player);
