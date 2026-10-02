@@ -5,6 +5,65 @@
 
 ---
 
+## 1.5.0 — 战国 3v3（三局两胜）
+
+新增一个**独立**的游戏模式，与既有 PVP / PVE 并存、互不影响。
+
+### 玩法
+
+- **三局两胜**：每小局先攻陷敌方天守阁者胜；先赢两小局者赢得整场（赛制与局时长可配）。
+  超时按箭楼占领数判定，持平则本局重开——否则「龟缩到时间结束」会成为有效战术。
+- **天守阁**：纯方块结构、**永久不可直接破坏**（拦截方块破坏与爆炸，不改地形）。
+  唯一胜利通道是击破器。
+- **箭楼**（上、下路各一座）：击败盘踞的**牛鬼**（尸壳）与**虾兵蟹将**（卫道士）
+  → 敲响铜钟 → 站进占领区读条。**双方同时读条时互锁**（两张进度都停滞、不清零），
+  可被反复易手；每次易手后守卫重刷，下一次争夺仍要先清守卫。
+- **大将击破器**：占领任一箭楼后在**敌方**天守阁门前生成。拾取携带 → 进入敌方天守阁范围
+  自动读条 → 读满本小局立即获胜。**不可破坏 / 不可丢弃 / 不可被敌方捡走 / 不可入箱**；
+  被消耗后再占领箭楼会自动补齐。
+- **跳跃台**：占领任一箭楼后在**己方**天守阁门前激活。站上去 TP 到最近的己方已占领箭楼，
+  阵亡复活后可直接使用——阵亡一次不该让整条进攻线断掉。
+- **中地小兵**：场地中央持续生成，**允许被绕过**（不强制清兵）；击杀攒能量，
+  能量满按 **Q** 释放必杀技。清兵的回报是能量而不是战利品（掉落与经验已清空）。
+
+### 架构
+
+新模式**独立**，`GameRoom` 的 `Phase` 语义不变（仍描述一个小局的生命周期），
+多局制由新增的 `SengokuSession` 编排层承担，对 PVP / PVE 零影响。
+
+- core 层（纯 Java，无 Bukkit）：`SengokuMode` `SengokuRules` `SengokuScore` `RoundResult`
+  `TowerRules` `TowerContest` `SiegeRules` `MidMinionRules` `EnergyRules`
+- paper 层：`SengokuSession` `TowerManager` `TowerCaptureManager` `KeepManager`
+  `SiegeBreakerManager` `JumpPadManager` `MidMinionManager` `EnergyManager`
+  `SengokuMapDef` `SengokuCommand` `SengokuListener`
+
+几处刻意的选择：箭楼争夺的互锁规则与击破器的护栏判定都抽到了 core 层以便离线断言；
+天守阁保护不需要「本局是否已攻陷」状态（读条完成会立即结束小局，`isRunning` 自然变 false）；
+跳跃台默认 TP 而非弹射（不受地形影响、必然抵达）。
+
+### 配置（五份，改完 `/taketori reload` 即生效）
+
+`sengoku.yml`（对局骨架）· `sengoku-towers.yml`（箭楼与守卫）·
+`sengoku-siege.yml`（击破器与跳跃台）· `sengoku-minions.yml`（中地小兵）·
+`sengoku-energy.yml`（能量与必杀）。场地点位写在 `arenas.yml` 的
+`arenas.<id>.sengoku` 段，由 `/taketori sengoku` 的划区命令写入。
+
+### 命令
+
+`/taketori sengoku`（权限 `taketori.admin`）：
+
+- 划区：`setkeep` / `setkeepdoor` / `settower` / `setbell` / `setguard` / `setmid` / `setjumppad`
+- 运维：`start` / `pause` / `resume` / `endround` / `towers` / `breaker` / `jumppad` / `score` / `check`
+
+`/taketori doctor` 增加「战国 3v3」一节：配置值、实体名与材质名能否解析、七类点位是否齐全。
+
+### 测试
+
+离线断言新增 `SengokuRoundTest`（74 项：赛制规整 / 超时判定 / 平局语义 / 模式解析 / 能量规则）
+与 `TowerContestTest`（39 项：互锁规则的各种组合）。既有回归全部保持通过。
+
+---
+
 ## 1.4.2 — 清掉 2.0 的遗留死参数并补齐两处设计缺口
 
 - **`projectile.armor-pierce` 有了独立时长键** `armor-pierce-ticks`：此前复用了 `mark-ticks`，
