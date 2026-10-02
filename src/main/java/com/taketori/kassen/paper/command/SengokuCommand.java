@@ -3,6 +3,7 @@ package com.taketori.kassen.paper.command;
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.core.match.sengoku.RoundResult;
+import com.taketori.kassen.core.match.sengoku.SengokuMode;
 import com.taketori.kassen.paper.match.ArenaDef;
 import com.taketori.kassen.paper.match.CuboidRegion;
 import com.taketori.kassen.paper.match.room.GameRoom;
@@ -77,8 +78,60 @@ public final class SengokuCommand {
             case "breaker" -> showBreaker(sender, args);
             case "jumppad" -> showJumpPad(sender, args);
             case "check" -> checkMap(sender);
+            case "mode" -> switchMode(sender, args);
+            case "menu", "gui" -> openMenu(sender);
             default -> usage(sender);
         }
+    }
+
+    /**
+     * {@code /taketori sengoku mode <pvp|pve|sengoku_3v3>}：切<b>全局默认</b>模式并写回 config.yml。
+     *
+     * <p>存在的意义是不用让管理员手动去翻 config.yml 再 reload —— 那是这条流程里最容易
+     * 出错也最容易被忘掉的一步。只影响之后新建的房间（模式在房间创建时快照）。</p>
+     */
+    private void switchMode(CommandSender sender, String[] args) {
+        SengokuMode current = plugin.config().matchMode();
+        if (args.length < 3) {
+            send(sender, "<gold>当前全局模式：<white>" + current.key()
+                    + "</white> <dark_gray>(" + describeMode(current) + ")");
+            send(sender, "<gray>用法：<white>/taketori sengoku mode <pvp|pve|sengoku_3v3>");
+            send(sender, "<dark_gray>只影响之后新建的房间；改单个房间用 "
+                    + "/taketori match mode <模式> [房间id]。");
+            return;
+        }
+        SengokuMode mode = SengokuMode.parse(args[2], null);
+        if (mode == null) {
+            send(sender, "<red>模式只能是 <white>pvp</white> / <white>pve</white> "
+                    + "/ <white>sengoku_3v3</white>。");
+            return;
+        }
+        plugin.config().setMatchMode(mode);
+        send(sender, "<green>全局模式已设为 <white>" + mode.key() + "</white> <gray>（已写入 config.yml）。");
+        send(sender, "<gray>" + describeMode(mode));
+        long running = plugin.rooms().rooms().stream().filter(GameRoom::isRunning).count();
+        if (running > 0) {
+            send(sender, "<yellow>有 " + running + " 个房间正在对局，它们仍用创建时的模式。");
+        }
+        if (mode.isSengoku()) {
+            send(sender, "<dark_gray>别忘了点位：<white>/taketori sengoku check");
+        }
+    }
+
+    private String describeMode(SengokuMode mode) {
+        return switch (mode) {
+            case PVE -> "所有人同一队打月人，含据点保卫与波次";
+            case SENGOKU_3V3 -> "三局两胜：清守卫 → 敲钟占领箭楼 → 击破器攻陷敌方天守阁";
+            default -> "红蓝对抗，积分赛";
+        };
+    }
+
+    private void openMenu(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            send(sender, "<red>菜单只能由玩家打开。");
+            return;
+        }
+        plugin.sengokuMenu().open(player);
     }
 
     // ---------------------------------------------------------------- 划区
@@ -497,6 +550,12 @@ public final class SengokuCommand {
                 "jumppad [red|blue]      查看跳跃台状态",
                 "score                   查看比分与各人能量（所有玩家可用）",
                 "check                   检查本场地点位是否齐全")) {
+            send(sender, "<gray>  " + line);
+        }
+        send(sender, "<yellow>模式<gray>（写回 config.yml，只影响之后新建的房间）：");
+        for (String line : List.of(
+                "mode [pvp|pve|sengoku_3v3]  查看或切换全局默认模式",
+                "menu                        打开图形化面板（同一组指令的按钮版）")) {
             send(sender, "<gray>  " + line);
         }
     }

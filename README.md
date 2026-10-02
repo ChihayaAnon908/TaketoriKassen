@@ -414,7 +414,19 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 /taketori sengoku breaker [red|blue]       查看击破器位置与自己当前的读条进度
 /taketori sengoku jumppad [red|blue]       查看跳跃台状态与位置
 /taketori sengoku score                    查看比分、剩余时间、各人能量
+/taketori sengoku mode [pvp|pve|sengoku_3v3]  查看 / 切换全局默认模式（写回 config.yml）
+/taketori sengoku menu                     打开图形化面板（上面这些的按钮版）
 ```
+
+**切模式**有两种粒度：
+
+```
+/taketori sengoku mode sengoku_3v3     全局默认（写回 config.yml，只影响之后新建的房间）
+/taketori match mode sengoku_3v3 [房间id]  只切一个房间（等待中才能切，不影响别人）
+```
+
+**图形化面板**：`/taketori admin` → 「战国 3v3」，或直接 `/taketori sengoku menu`。
+划区按钮作用在当前选区 / 你站的位置上，面板顶部会显示选区状态与当前模式。
 
 **场地**（多场地：`set*` / `del*` 作用于当前选中的场地，先用 `create` / `select` 选中）
 

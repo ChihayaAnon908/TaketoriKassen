@@ -549,6 +549,18 @@ public final class ConfigManager {
         return SengokuMode.parse(plugin.getConfig().getString("match.mode", "pvp"), SengokuMode.PVP);
     }
 
+    /**
+     * 写回<b>全局默认</b>模式（config.yml 的 {@code match.mode}）。
+     *
+     * <p>只影响之后<b>新建</b>的房间——模式在房间创建时快照成字段，
+     * 已经在跑的对局不会因为一次切换而变异。要改单个房间用
+     * {@code /taketori match mode <模式> [房间id]}。</p>
+     */
+    public void setMatchMode(SengokuMode mode) {
+        plugin.getConfig().set("match.mode", mode.key());
+        plugin.saveConfig();
+    }
+
     public WeaponManager weapons() {
         return weapons;
     }

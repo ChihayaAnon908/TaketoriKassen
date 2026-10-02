@@ -5,6 +5,7 @@ import com.taketori.kassen.core.lobby.LobbyAction;
 import com.taketori.kassen.core.match.BaseArgParser;
 import com.taketori.kassen.core.match.PveSettings;
 import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.core.match.sengoku.SengokuMode;
 import com.taketori.kassen.paper.match.ArenaManager;
 import com.taketori.kassen.paper.match.CuboidRegion;
 import com.taketori.kassen.paper.match.StatsTracker;
@@ -362,15 +363,19 @@ public final class MatchCommand {
             send(sender, "<gold>===== 各房间模式 =====");
             for (GameRoom room : plugin.rooms().rooms()) {
                 send(sender, "<gray>[" + room.id() + "] <white>" + room.display()
-                        + " <gray>：<white>" + (room.isPve() ? "PVE" : "PVP")
+                        + " <gray>：<white>" + modeText(room)
                         + " <dark_gray>（" + phaseText(room) + "）");
             }
-            send(sender, "<gray>用法：/taketori match mode <pvp|pve> [房间id]（只改该房间，等待中可切）");
+            send(sender, "<gray>用法：/taketori match mode <pvp|pve|sengoku_3v3> [房间id]"
+                    + "（只改该房间，等待中可切）");
+            send(sender, "<dark_gray>要改全局默认（之后新建的房间都用它）："
+                    + "<white>/taketori sengoku mode <模式>");
             return;
         }
-        String mode = args[2].toLowerCase(Locale.ROOT);
-        if (!"pvp".equals(mode) && !"pve".equals(mode)) {
-            send(sender, "<red>模式只能是 pvp 或 pve。");
+        SengokuMode mode = SengokuMode.parse(args[2], null);
+        if (mode == null) {
+            send(sender, "<red>模式只能是 <white>pvp</white> / <white>pve</white> "
+                    + "/ <white>sengoku_3v3</white>。");
             return;
         }
         GameRoom target;
@@ -387,18 +392,33 @@ public final class MatchCommand {
                 return;
             }
         }
-        String error = target.setMode(mode);
+        String error = target.setMode(mode.key());
         if (error != null) {
             send(sender, "<red>房间 " + target.display() + "：" + error);
             return;
         }
         send(sender, "<green>房间 <white>" + target.display() + "</white> 已切换为 <white>"
-                + mode.toUpperCase(Locale.ROOT) + "</white> <gray>模式（仅本房间，下一轮开局生效）。");
-        if ("pve".equals(mode)) {
-            send(sender, "<gray>PVE：所有人同一队打月人，不占点；友伤保护按 <white>auto</white> 会关闭。");
-        } else {
-            send(sender, "<gray>PVP：红蓝对抗；友伤保护按 <white>auto</white> 会开启（同队互免伤害）。");
+                + modeText(target) + "</white> <gray>模式（仅本房间，下一轮开局生效）。");
+        switch (mode) {
+            case PVE -> send(sender, "<gray>PVE：所有人同一队打月人，不占点；"
+                    + "友伤保护按 <white>auto</white> 会关闭。");
+            case SENGOKU_3V3 -> {
+                send(sender, "<gray>战国 3v3：三局两胜，清守卫 → 敲钟占领箭楼 → "
+                        + "用大将击破器攻陷敌方天守阁。");
+                send(sender, "<dark_gray>开局的就绪判定只看战国点位，"
+                        + "用 <white>/taketori sengoku check</white> 确认是否齐全。");
+            }
+            default -> send(sender, "<gray>PVP：红蓝对抗；"
+                    + "友伤保护按 <white>auto</white> 会开启（同队互免伤害）。");
         }
+    }
+
+    /** 房间模式的显示名。 */
+    private String modeText(GameRoom room) {
+        if (room.isSengoku()) {
+            return "战国 3v3";
+        }
+        return room.isPve() ? "PVE" : "PVP";
     }
 
     private boolean isForceFlag(String text) {

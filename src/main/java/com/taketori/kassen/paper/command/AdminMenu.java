@@ -147,6 +147,14 @@ public final class AdminMenu implements Listener {
                 "<dark_gray>清掉 pos1 / pos2，重新划",
                 "taketori arena clearselection"));
 
+        // ---- 玩法专属菜单 ----
+        inventory.setItem(34, run(Material.CROSSBOW, "<gold>战国 3v3",
+                "<gray>划区（天守阁 / 箭楼 / 铜钟 / 守卫 / 中地 / 跳跃台）",
+                "<gray>与运维（开局 / 暂停 / 结束本局 / 比分）",
+                "<gray>还有全局模式切换（PVP / PVE / 战国）",
+                "<dark_gray>等价命令：/taketori sengoku menu",
+                "taketori sengoku menu"));
+
         // ---- 大厅与维护 ----
         inventory.setItem(28, run(Material.OAK_SIGN, "<white>大厅配置",
                 "<dark_gray>/taketori lobby list", "taketori lobby list"));

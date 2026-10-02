@@ -126,6 +126,7 @@ public final class TaketoriPlugin extends JavaPlugin {
     private StatsMenu statsMenu;
     /** 管理员菜单（把常用管理指令映射成按钮）。 */
     private AdminMenu adminMenu;
+    private com.taketori.kassen.paper.command.SengokuMenu sengokuMenu;
     /** 隐性标签设置界面（管理员）。 */
     private TagMenu tagMenu;
     /** 隐性标签与权重（config.yml 的 tags 段）。 */
@@ -199,6 +200,7 @@ public final class TaketoriPlugin extends JavaPlugin {
         roomListMenu = new com.taketori.kassen.paper.lobby.RoomListMenu(this);
         statsMenu = new StatsMenu(this);
         adminMenu = new AdminMenu(this);
+        sengokuMenu = new com.taketori.kassen.paper.command.SengokuMenu(this);
         tagMenu = new TagMenu(this);
         // ---- 管理用具：选区锄（左键/右键点方块划区域，带边框可视化）----
         setupWand = new SetupWandService(this, new SetupWand(this));
@@ -222,6 +224,7 @@ public final class TaketoriPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(roomListMenu, this);
         getServer().getPluginManager().registerEvents(statsMenu, this);
         getServer().getPluginManager().registerEvents(adminMenu, this);
+        getServer().getPluginManager().registerEvents(sengokuMenu, this);
         getServer().getPluginManager().registerEvents(tagMenu, this);
         // 每秒驱动全部房间计时（含观战提醒）
         scheduler.runTimerTask(() -> {
@@ -995,6 +998,11 @@ public final class TaketoriPlugin extends JavaPlugin {
     /** 管理员菜单（把常用管理指令映射成按钮）。 */
     public AdminMenu adminMenu() {
         return adminMenu;
+    }
+
+    /** 战国 3v3 管理菜单（{@code /taketori sengoku menu}）。 */
+    public com.taketori.kassen.paper.command.SengokuMenu sengokuMenu() {
+        return sengokuMenu;
     }
 
     /** 隐性标签设置界面（管理员）。 */
