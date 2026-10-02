@@ -1,4 +1,5 @@
 import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.core.match.sengoku.EnergyRules;
 import com.taketori.kassen.core.match.sengoku.RoundResult;
 import com.taketori.kassen.core.match.sengoku.SengokuMode;
 import com.taketori.kassen.core.match.sengoku.SengokuRules;
@@ -125,6 +126,37 @@ public class SengokuRoundTest {
         expectBool("PVP 不是多局制", false, SengokuMode.PVP.isMultiRound());
         expectBool("PVE 不是战国模式", false, SengokuMode.PVE.isSengoku());
 
+        // ── 能量规则（sengoku-energy.yml 的纯逻辑） ─────────────────────
+        EnergyRules energy = EnergyRules.defaults();
+        expectInt("默认能量上限 100", 100, energy.safeMax());
+        expectInt("默认每只小兵 8 点", 8, energy.safePerMinion());
+        expectBool("99 点不算满", false, energy.isFull(99));
+        expectBool("100 点算满", true, energy.isFull(100));
+        expectBool("超过上限也算满", true, energy.isFull(150));
+        expectInt("clamp 夹住上限", 100, energy.clamp(150));
+        expectInt("clamp 夹住下限", 0, energy.clamp(-20));
+        expectBool("默认占用 Q 槽", true, energy.usesQSlot());
+
+        EnergyRules badEnergy = new EnergyRules(0, 0, 0, EnergyRules.Display.NONE, "q",
+                EnergyRules.UltimateSpec.defaults(), java.util.Map.of());
+        expectInt("上限写成 0 兜底成 1", 1, badEnergy.safeMax());
+        expectInt("每只小兵写成负数兜底成 0", 0, badEnergy.safePerMinion());
+        expectBool("上限为 1 时 1 点即满", true, badEnergy.isFull(1));
+
+        // 逐角色覆盖：配了的用自己那套，没配的落回默认
+        EnergyRules.UltimateSpec kaguyaSpec = new EnergyRules.UltimateSpec(
+                "shockwave", 18.0D, 6.0D, 0.9D, 0.5D, 40, 1, "EXPLOSION", "ENTITY_GENERIC_EXPLODE");
+        EnergyRules withOverride = new EnergyRules(100, 8, 20, EnergyRules.Display.ACTIONBAR, "q",
+                EnergyRules.UltimateSpec.defaults(), java.util.Map.of("kaguya", kaguyaSpec));
+        expectDouble("配了覆盖的角色用自己那套", 18.0D,
+                withOverride.ultimateFor("kaguya").damage());
+        expectDouble("没配的角色落回默认", 14.0D,
+                withOverride.ultimateFor("mikado").damage());
+        expectDouble("角色 id 大小写不敏感", 18.0D,
+                withOverride.ultimateFor("KAGUYA").damage());
+        expectDouble("characterId 为 null 时落回默认", 14.0D,
+                withOverride.ultimateFor(null).damage());
+
         System.out.println("SengokuRoundTest: passed=" + passed + " failed=" + failed);
         if (failed > 0) {
             System.exit(1);
@@ -147,6 +179,15 @@ public class SengokuRoundTest {
 
     private static void expectBool(String name, boolean expected, boolean actual) {
         check(name, String.valueOf(expected), String.valueOf(actual));
+    }
+
+    private static void expectDouble(String name, double expected, double actual) {
+        if (Math.abs(expected - actual) < 0.000001D) {
+            passed++;
+        } else {
+            failed++;
+            System.out.println("  [FAIL] " + name + "：期望 " + expected + "，实际 " + actual);
+        }
     }
 
     private static void expectTeam(String name, TeamId expected, TeamId actual) {

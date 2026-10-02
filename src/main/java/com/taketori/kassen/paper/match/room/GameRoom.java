@@ -289,6 +289,9 @@ public final class GameRoom {
     /** 战国模式的中地小兵（懒加载）。 */
     private com.taketori.kassen.paper.match.sengoku.MidMinionManager sengokuMidMinions;
 
+    /** 战国模式的能量槽（懒加载；纯状态，没有 tick）。 */
+    private com.taketori.kassen.paper.match.sengoku.EnergyManager sengokuEnergy;
+
     /**
      * 本房间是否战国 3v3 模式。
      *
@@ -353,6 +356,14 @@ public final class GameRoom {
             sengokuMidMinions = new com.taketori.kassen.paper.match.sengoku.MidMinionManager(this);
         }
         return sengokuMidMinions;
+    }
+
+    /** 战国模式的能量槽（懒加载；纯状态，没有 tick）。 */
+    public com.taketori.kassen.paper.match.sengoku.EnergyManager energy() {
+        if (sengokuEnergy == null) {
+            sengokuEnergy = new com.taketori.kassen.paper.match.sengoku.EnergyManager(this);
+        }
+        return sengokuEnergy;
     }
 
     public boolean isRunning() {
@@ -1796,6 +1807,10 @@ public final class GameRoom {
         clearSummons();
         clearDroppedItems();
         clearSkillProjectiles();
+        // 能量属于战场状态：每小局从零开始（跨局战绩才是不该动的那部分）
+        if (sengokuEnergy != null) {
+            sengokuEnergy.clearAll();
+        }
     }
 
     /**

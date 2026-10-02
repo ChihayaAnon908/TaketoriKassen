@@ -3,6 +3,7 @@ package com.taketori.kassen.paper.listener;
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.paper.match.room.GameRoom;
+import com.taketori.kassen.paper.match.sengoku.MidMinionManager;
 import com.taketori.kassen.paper.match.sengoku.SiegeBreakerManager;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Location;
@@ -16,6 +17,7 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.ItemDespawnEvent;
@@ -244,6 +246,33 @@ public final class SengokuListener implements Listener {
             return SiegeBreakerManager.breakerTeamOf(hotbar) != null;
         }
         return false;
+    }
+
+    // ── 中地小兵：击杀回能 ────────────────────────────────────────────
+
+    /**
+     * 击杀中地小兵攒能量（需求第 15 条）。
+     *
+     * <p>用 MONITOR 优先级：先让其它监听器（掉落、统计）跑完，这里只做收尾。
+     * 同时清掉落与经验——否则"刷小兵捡装备"会变成另一条套利路径，
+     * 而需求给清兵的回报是<b>能量</b>，不是战利品。</p>
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onMidMinionDeath(EntityDeathEvent event) {
+        if (!MidMinionManager.isMidMinion(event.getEntity())) {
+            return;
+        }
+        event.getDrops().clear();
+        event.setDroppedExp(0);
+        Player killer = event.getEntity().getKiller();
+        if (killer == null) {
+            return;
+        }
+        GameRoom room = sengokuRoomOf(killer);
+        if (room == null || !room.isRunning()) {
+            return;
+        }
+        room.energy().add(killer, plugin.config().energyRules().safePerMinion());
     }
 
     private GameRoom sengokuRoomOf(Player player) {        if (player == null) {

@@ -4,6 +4,7 @@ import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.character.CharacterDef;
 import com.taketori.kassen.core.character.CharacterManager;
 import com.taketori.kassen.core.match.PveSettings;
+import com.taketori.kassen.core.match.sengoku.EnergyRules;
 import com.taketori.kassen.core.match.sengoku.MidMinionRules;
 import com.taketori.kassen.core.match.sengoku.SengokuMode;
 import com.taketori.kassen.core.match.sengoku.SengokuRules;
@@ -63,6 +64,9 @@ public final class ConfigManager {
     /** 战国模式的中地小兵规则（{@code sengoku-minions.yml}）。 */
     private MidMinionRules midMinionRules = MidMinionRules.defaults();
 
+    /** 战国模式的能量槽与必杀技规则（{@code sengoku-energy.yml}）。 */
+    private EnergyRules energyRules = EnergyRules.defaults();
+
     private int configVersion = 1;
     private boolean debug;
     private boolean actionbar = true;
@@ -116,6 +120,7 @@ public final class ConfigManager {
         parseTowers(loadYaml("sengoku-towers.yml", false));
         parseSiege(loadYaml("sengoku-siege.yml", false));
         parseMidMinions(loadYaml("sengoku-minions.yml", false));
+        parseEnergy(loadYaml("sengoku-energy.yml", false));
 
         YamlConfiguration weaponYaml = loadYaml("weapons.yml", false);
         int templateVersion = weaponYaml.getInt("config-version", 1);
@@ -476,6 +481,71 @@ public final class ConfigManager {
     /** 战国模式的中地小兵规则（{@code sengoku-minions.yml}）。 */
     public MidMinionRules midMinionRules() {
         return midMinionRules;
+    }
+
+    /** 解析 {@code sengoku-energy.yml}，含逐角色覆盖表。 */
+    private void parseEnergy(YamlConfiguration yaml) {
+        EnergyRules fallback = EnergyRules.defaults();
+        if (yaml == null) {
+            energyRules = fallback;
+            return;
+        }
+        ConfigurationSection ultimate = yaml.getConfigurationSection("ultimate");
+        EnergyRules.UltimateSpec defaultSpec = parseUltimate(
+                ultimate == null ? null : ultimate.getConfigurationSection("default"),
+                fallback.defaultUltimate());
+        // 逐角色覆盖：键是角色 id，值缺哪项就继承 default（这样只改一个数字也能写得下）
+        Map<String, EnergyRules.UltimateSpec> perCharacter = EnergyRules.newCharacterMap();
+        if (ultimate != null) {
+            for (String key : ultimate.getKeys(false)) {
+                if ("default".equalsIgnoreCase(key)) {
+                    continue;
+                }
+                perCharacter.put(key.trim().toLowerCase(java.util.Locale.ROOT),
+                        parseUltimate(ultimate.getConfigurationSection(key), defaultSpec));
+            }
+        }
+        energyRules = new EnergyRules(
+                yaml.getInt("max", fallback.max()),
+                yaml.getInt("per-minion", fallback.perMinion()),
+                yaml.getInt("per-elite-minion", fallback.perEliteMinion()),
+                parseEnergyDisplay(yaml.getString("display"), fallback.display()),
+                yaml.getString("ultimate-slot", fallback.ultimateSlot()),
+                defaultSpec, perCharacter);
+    }
+
+    private EnergyRules.UltimateSpec parseUltimate(ConfigurationSection section,
+                                                   EnergyRules.UltimateSpec fallback) {
+        if (section == null) {
+            return fallback;
+        }
+        return new EnergyRules.UltimateSpec(
+                section.getString("type", fallback.type()),
+                section.getDouble("damage", fallback.damage()),
+                section.getDouble("radius", fallback.radius()),
+                section.getDouble("knockback", fallback.knockback()),
+                section.getDouble("launch", fallback.launch()),
+                section.getInt("slow-duration", fallback.slowDuration()),
+                section.getInt("slow-amplifier", fallback.slowAmplifier()),
+                section.getString("particle", fallback.particle()),
+                section.getString("sound", fallback.sound()));
+    }
+
+    private EnergyRules.Display parseEnergyDisplay(String raw, EnergyRules.Display fallback) {
+        if (raw == null) {
+            return fallback;
+        }
+        return switch (raw.trim().toLowerCase(java.util.Locale.ROOT)) {
+            case "bossbar" -> EnergyRules.Display.BOSSBAR;
+            case "none" -> EnergyRules.Display.NONE;
+            case "actionbar" -> EnergyRules.Display.ACTIONBAR;
+            default -> fallback;
+        };
+    }
+
+    /** 战国模式的能量槽与必杀技规则（{@code sengoku-energy.yml}）。 */
+    public EnergyRules energyRules() {
+        return energyRules;
     }
 
     /** 当前对局模式（config.yml 的 {@code match.mode}），认不出回退 PVP。 */
