@@ -105,6 +105,15 @@ public final class ArenaDef {
     /** 等待区区域（可选）：设置了就用整个选区，加入者在区域内随机分布；未设置时用 waitSpawn 单点。 */
     private CuboidRegion waitRegion;
 
+    /**
+     * 战国 3v3 专用点位：天守阁、箭楼（含铜钟与守卫刷新点）、中地小兵刷新区、跳跃台。
+     *
+     * <p>独立成 {@link com.taketori.kassen.paper.match.sengoku.SengokuMapDef} 而不是继续往本类堆字段：
+     * 这些点位只被新模式读，堆进来会让 PVP / PVE 两条线也跟着变大变脆。非战国地图这一整段为空，
+     * 与既有逻辑完全无交集。</p>
+     */
+    private final com.taketori.kassen.paper.match.sengoku.SengokuMapDef sengoku;
+
     // ---- 本场地月人刷新节奏（arenas.yml 的 minion-spawn 段；null = 用 config.yml 的 minion 全局默认值）----
     private Integer spawnIntervalSeconds;
     private Integer spawnPerSpawn;
@@ -114,6 +123,8 @@ public final class ArenaDef {
         this.plugin = plugin;
         this.id = id;
         this.display = id;
+        // 必须在 id 赋值之后再构造：SengokuMapDef 记着场地 id 用于告警文案
+        this.sengoku = new com.taketori.kassen.paper.match.sengoku.SengokuMapDef(plugin, id);
         for (TeamId team : TeamId.values()) {
             bases.put(team, new LinkedHashMap<>());
         }
@@ -203,6 +214,8 @@ public final class ArenaDef {
         copy.spawnIntervalSeconds = spawnIntervalSeconds;
         copy.spawnPerSpawn = spawnPerSpawn;
         copy.spawnMaxAlive = spawnMaxAlive;
+        // 战国点位：整份克隆并重定向到房间世界
+        copy.sengoku.copyFrom(sengoku.copyForWorld(worldName));
         return copy;
     }
 
@@ -669,6 +682,8 @@ public final class ArenaDef {
         outpost = Point.read(section.getConfigurationSection("outpost"));
         waitSpawn = Point.read(section.getConfigurationSection("wait-spawn"));
         waitRegion = CuboidRegion.read(section.getConfigurationSection("wait-region"));
+        // 战国点位：整段缺失是正常的（非战国地图本来就没有）
+        sengoku.read(section.getConfigurationSection("sengoku"));
 
         ConfigurationSection minionSpawnSection = section.getConfigurationSection("minion-spawn");
         if (minionSpawnSection != null) {
@@ -780,5 +795,14 @@ public final class ArenaDef {
                 spawnSection.set("max-alive", spawnMaxAlive);
             }
         }
+        // 战国点位：有内容才写，避免给非战国地图凭空加上一个空段
+        if (!sengoku.isEmpty()) {
+            sengoku.write(section.createSection("sengoku"));
+        }
+    }
+
+    /** 战国 3v3 专用点位（非战国地图为空）。 */
+    public com.taketori.kassen.paper.match.sengoku.SengokuMapDef sengoku() {
+        return sengoku;
     }
 }
