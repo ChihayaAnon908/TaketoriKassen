@@ -1807,9 +1807,36 @@ public final class GameRoom {
         clearSummons();
         clearDroppedItems();
         clearSkillProjectiles();
+        // 背包里的击破器也要收掉：stopComponents 只清了掉在地上的那些，
+        // 而击破器的常态是"在某个人背包里"——漏掉就等于白送下一局一次攻陷机会
+        if (sengokuSiege != null) {
+            sengokuSiege.removeFromInventories();
+        }
         // 能量属于战场状态：每小局从零开始（跨局战绩才是不该动的那部分）
         if (sengokuEnergy != null) {
             sengokuEnergy.clearAll();
+        }
+        clearParticipantCombatState();
+    }
+
+    /**
+     * 清掉参赛者的临时战斗状态与药水效果（需求第 33 条要求重置"临时状态"）。
+     *
+     * <p>不清的话，上一局被挂的减速 / 易伤标记 / 破甲 / 防御窗口 / 连击层数会直接带进
+     * 下一局——玩家在新一局开局就莫名其妙地"被标着""被破着甲"。</p>
+     *
+     * <p>只清参赛者，不碰 {@code CombatStates.clearAll()}（那是全局的，会误伤其它房间）。</p>
+     */
+    private void clearParticipantCombatState() {
+        for (TeamId team : TeamId.values()) {
+            for (Player player : teamPlayers(team)) {
+                plugin.states().clear(player.getUniqueId());
+                for (PotionEffect effect : new ArrayList<>(player.getActivePotionEffects())) {
+                    player.removePotionEffect(effect.getType());
+                }
+                player.setFireTicks(0);
+                player.setFallDistance(0.0F);
+            }
         }
     }
 

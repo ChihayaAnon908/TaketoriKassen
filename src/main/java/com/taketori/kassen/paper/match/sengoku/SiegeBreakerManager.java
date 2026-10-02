@@ -219,6 +219,44 @@ public final class SiegeBreakerManager {
         return player != null && carriedBreakerTeam(player) != null;
     }
 
+    /**
+     * 小局重置：把所有人背包里的击破器收掉。
+     *
+     * <p>必须单独做这一步——{@link #stop()} 只清了<b>掉在地上</b>的那些，
+     * 而击破器的常态是"在某个人背包里"。漏掉的话上一局的攻城件会直接带进下一局，
+     * 等于白送一次攻陷机会。</p>
+     */
+    public void removeFromInventories() {
+        for (TeamId team : TeamId.values()) {
+            for (Player player : room.teamPlayers(team)) {
+                removeFromInventory(player);
+            }
+        }
+        progress.clear();
+        lastLeaveNotice.clear();
+    }
+
+    private void removeFromInventory(Player player) {
+        if (player == null) {
+            return;
+        }
+        var inventory = player.getInventory();
+        boolean changed = false;
+        for (int slot = 0; slot < inventory.getSize(); slot++) {
+            if (breakerTeamOf(inventory.getItem(slot)) != null) {
+                inventory.setItem(slot, null);
+                changed = true;
+            }
+        }
+        if (breakerTeamOf(inventory.getItemInOffHand()) != null) {
+            inventory.setItemInOffHand(null);
+            changed = true;
+        }
+        if (changed && player.isOnline()) {
+            player.updateInventory();
+        }
+    }
+
     // ---------------------------------------------------------------- tick：读条
 
     private void tick() {
