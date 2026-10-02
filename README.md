@@ -407,6 +407,14 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 /taketori sengoku setmid [序号]            中地小兵刷新区
 /taketori sengoku setjumppad <red|blue>    跳跃台位置
 /taketori sengoku check                    检查本场地的战国点位是否齐全
+/taketori sengoku delkeep <red|blue>       清除天守阁区域
+/taketori sengoku delkeepdoor <red|blue>   清除天守阁门前点
+/taketori sengoku deltower <序号>          清除整座箭楼（占领区 + 铜钟 + 守卫点）
+/taketori sengoku delbell <序号>           只清铜钟
+/taketori sengoku delguard <序号>          只清守卫刷新点
+/taketori sengoku delmid <序号>            清除中地小兵刷新区
+/taketori sengoku deljumppad <red|blue>    清除跳跃台
+/taketori sengoku delall confirm           清空本场地的全部战国点位
 /taketori sengoku start                    强制开局
 /taketori sengoku pause | resume           暂停 / 继续小局计时（暂停不吃局内时间）
 /taketori sengoku endround [red|blue]      强制结束本小局（不指定则判平局重开）

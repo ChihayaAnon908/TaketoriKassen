@@ -441,6 +441,49 @@ public final class SengokuMapDef {
         return jumpPads.get(team);
     }
 
+    // ---------------------------------------------------------------- 清除（画错了要能改）
+
+    /** 清掉某队天守阁区域。 */
+    public boolean clearKeep(TeamId team) {
+        return team != null && keeps.remove(team) != null;
+    }
+
+    /** 清掉某队天守阁门前点（击破器与跳跃台的生成依据）。 */
+    public boolean clearKeepDoor(TeamId team) {
+        return team != null && keepDoors.remove(team) != null;
+    }
+
+    /**
+     * 清掉整座箭楼：占领区 + 铜钟 + 守卫点。
+     *
+     * <p>三件是"同一座箭楼"的三个字段，只清其中一件会留下孤儿数据
+     * （例如铜钟还在但占领区没了，敲钟后会读到一张空表）。</p>
+     */
+    public boolean clearTower(int index) {
+        boolean removed = towers.remove(index) != null;
+        removed |= bells.remove(index) != null;
+        removed |= guardSpawns.remove(index) != null;
+        return removed;
+    }
+
+    /** 只清铜钟（想换一个钟的位置，但保留占领区与守卫点）。 */
+    public boolean clearBell(int index) {
+        return bells.remove(index) != null;
+    }
+
+    /** 只清守卫刷新点。 */
+    public boolean clearGuardSpawn(int index) {
+        return guardSpawns.remove(index) != null;
+    }
+
+    public boolean clearMidMinionRegion(int index) {
+        return midMinionRegions.remove(index) != null;
+    }
+
+    public boolean clearJumpPad(TeamId team) {
+        return team != null && jumpPads.remove(team) != null;
+    }
+
     public void setJumpPad(TeamId team, ArenaDef.Point point) {
         if (team != null && point != null) {
             jumpPads.put(team, point);

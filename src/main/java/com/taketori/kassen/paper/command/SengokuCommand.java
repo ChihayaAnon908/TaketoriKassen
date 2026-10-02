@@ -68,6 +68,15 @@ public final class SengokuCommand {
             case "setguard" -> setGuard(sender, args);
             case "setmid" -> setMidMinion(sender, args);
             case "setjumppad" -> setJumpPad(sender, args);
+            // ── 划错了要能改 ──────────────────────────────────────
+            case "delkeep" -> clearKeep(sender, args);
+            case "delkeepdoor" -> clearKeepDoor(sender, args);
+            case "deltower" -> clearTower(sender, args);
+            case "delbell" -> clearBell(sender, args);
+            case "delguard" -> clearGuard(sender, args);
+            case "delmid" -> clearMidMinion(sender, args);
+            case "deljumppad" -> clearJumpPad(sender, args);
+            case "delall" -> clearAll(sender, args);
             // ── 运维 ──────────────────────────────────────────────
             case "start" -> forceStart(sender);
             case "pause" -> setPaused(sender, true);
@@ -287,8 +296,7 @@ public final class SengokuCommand {
     }
 
     /** 点位写完之后统一做的事：保存、清选区、回报、刷新缺口清单。 */
-    private void afterEdit(CommandSender sender, Player player, ArenaDef def, String what, String detail) {
-        plugin.arena().save();
+    private void afterEdit(CommandSender sender, Player player, ArenaDef def, String what, String detail) {        plugin.arena().save();
         plugin.arena().clearSelection(player.getUniqueId());
         send(sender, "<green>[" + def.id() + "] " + what + " 已设置：<white>" + detail);
         int required = plugin.config().towerRules().safeCount();
@@ -446,6 +454,163 @@ public final class SengokuCommand {
                 : "<red>还缺：<white>" + missing);
     }
 
+    // ---------------------------------------------------------------- 清除
+
+    private void clearKeep(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        TeamId team = requireTeam(sender, args, 2);
+        if (team == null) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        afterClear(sender, def, team.display() + " 天守阁区域", def.sengoku().clearKeep(team));
+    }
+
+    private void clearKeepDoor(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        TeamId team = requireTeam(sender, args, 2);
+        if (team == null) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        afterClear(sender, def, team.display() + " 天守阁门前点", def.sengoku().clearKeepDoor(team));
+    }
+
+    private void clearTower(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        int index = requireIndex(sender, args, 2, SengokuMapDef.MAX_TOWERS, "箭楼");
+        if (index < 0) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        // 占领区 / 铜钟 / 守卫点是一体的，一次清掉，避免留孤儿数据
+        afterClear(sender, def, "箭楼 #" + index + "（占领区 + 铜钟 + 守卫点）",
+                def.sengoku().clearTower(index));
+    }
+
+    private void clearBell(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        int index = requireIndex(sender, args, 2, SengokuMapDef.MAX_TOWERS, "铜钟");
+        if (index < 0) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        afterClear(sender, def, "箭楼 #" + index + " 的铜钟", def.sengoku().clearBell(index));
+    }
+
+    private void clearGuard(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        int index = requireIndex(sender, args, 2, SengokuMapDef.MAX_TOWERS, "守卫点");
+        if (index < 0) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        afterClear(sender, def, "箭楼 #" + index + " 的守卫刷新点", def.sengoku().clearGuardSpawn(index));
+    }
+
+    private void clearMidMinion(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        int index = requireIndex(sender, args, 2, SengokuMapDef.MAX_MID_MINION_REGIONS, "中地小兵区");
+        if (index < 0) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        afterClear(sender, def, "中地小兵刷新区 #" + index, def.sengoku().clearMidMinionRegion(index));
+    }
+
+    private void clearJumpPad(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        TeamId team = requireTeam(sender, args, 2);
+        if (team == null) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        afterClear(sender, def, team.display() + " 跳跃台", def.sengoku().clearJumpPad(team));
+    }
+
+    /** 清空本场地的全部战国点位；需要显式补 {@code confirm}。 */
+    private void clearAll(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        ArenaDef def = requireArena(sender, player);
+        if (def == null) {
+            return;
+        }
+        if (args.length < 3 || !"confirm".equalsIgnoreCase(args[2])) {
+            send(sender, "<red>这会清空场地 <white>" + def.id() + "</white> 的<b>全部</b>战国点位。");
+            send(sender, "<gray>确认请执行：<white>/taketori sengoku delall confirm");
+            send(sender, "<dark_gray>当前点位：" + def.sengoku().describe());
+            return;
+        }
+        def.sengoku().clear();
+        plugin.arena().save();
+        send(sender, "<green>已清空场地 <white>" + def.id() + "</white> 的全部战国点位。");
+    }
+
+    /**
+     * 清除之后的统一收尾。
+     *
+     * <p>「本来就没有」也要回一句——否则管理员删完看到没有任何反馈，
+     * 会以为指令没生效、反复执行。</p>
+     */
+    private void afterClear(CommandSender sender, ArenaDef def, String what, boolean removed) {
+        if (!removed) {
+            send(sender, "<gray>本场地本来就没有" + what + "，无需清除。");
+            return;
+        }
+        plugin.arena().save();
+        send(sender, "<green>已清除" + what + "。");
+        int required = plugin.config().towerRules().safeCount();
+        String missing = def.sengoku().missingHint(required);
+        send(sender, missing.isEmpty()
+                ? "<green>剩余点位仍然齐全，可以开局。"
+                : "<gray>现在缺：<white>" + missing);
+    }
+
     // ---------------------------------------------------------------- 参数助手
 
     private Player requirePlayer(CommandSender sender) {
@@ -550,6 +715,18 @@ public final class SengokuCommand {
                 "jumppad [red|blue]      查看跳跃台状态",
                 "score                   查看比分与各人能量（所有玩家可用）",
                 "check                   检查本场地点位是否齐全")) {
+            send(sender, "<gray>  " + line);
+        }
+        send(sender, "<yellow>删除<gray>（画错了要能改；deltower 会连铜钟与守卫点一起清）：");
+        for (String line : List.of(
+                "delkeep <red|blue>      清除天守阁区域",
+                "delkeepdoor <red|blue>  清除天守阁门前点",
+                "deltower <序号>         清除整座箭楼（占领区 + 铜钟 + 守卫点）",
+                "delbell <序号>          只清铜钟",
+                "delguard <序号>         只清守卫刷新点",
+                "delmid <序号>           清除中地小兵刷新区",
+                "deljumppad <red|blue>   清除跳跃台",
+                "delall confirm          清空本场地的全部战国点位")) {
             send(sender, "<gray>  " + line);
         }
         send(sender, "<yellow>模式<gray>（写回 config.yml，只影响之后新建的房间）：");

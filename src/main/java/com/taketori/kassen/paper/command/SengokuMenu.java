@@ -1,7 +1,9 @@
 package com.taketori.kassen.paper.command;
 
 import com.taketori.kassen.TaketoriPlugin;
+import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.core.match.sengoku.SengokuMode;
+import com.taketori.kassen.paper.match.ArenaDef;
 import com.taketori.kassen.paper.match.room.GameRoom;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -46,7 +48,13 @@ public final class SengokuMenu implements Listener {
 
     /** 菜单持有者：避免用标题匹配识别界面。 */
     private static final class Holder implements InventoryHolder {
+        /** 是否是删除页（决定"返回"按钮回哪一页）。 */
+        private final boolean deletePage;
         private Inventory inventory;
+
+        Holder(boolean deletePage) {
+            this.deletePage = deletePage;
+        }
 
         void bind(Inventory value) {
             this.inventory = value;
@@ -80,7 +88,7 @@ public final class SengokuMenu implements Listener {
             player.sendMessage(MINI.deserialize("<red>需要 taketori.admin 权限。"));
             return;
         }
-        Holder holder = new Holder();
+        Holder holder = new Holder(false);
         Inventory inventory = Bukkit.createInventory(holder, 54,
                 MINI.deserialize("<dark_red>竹取合战 <dark_gray>· <white>战国 3v3"));
         holder.bind(inventory);
@@ -178,11 +186,94 @@ public final class SengokuMenu implements Listener {
 
         inventory.setItem(45, run(Material.COMMAND_BLOCK, "<white>热重载配置",
                 "<dark_gray>/taketori reload", "taketori reload"));
+        inventory.setItem(41, button(Material.TNT, "<red>删除已划点位",
+                "<gray>删天守阁 / 门前点 / 箭楼 / 铜钟 / 守卫 / 中地 / 跳跃台",
+                "<gray>点进子页后<white>点条目即删除</white>",
+                "<dark_gray>等价命令：/taketori sengoku delkeep | deltower | …"));
         inventory.setItem(49, run(Material.PAPER, "<white>刷新本页",
                 "<dark_gray>选区与房间状态会重新读取", "taketori sengoku menu"));
         inventory.setItem(53, button(Material.BARRIER, "<red>关闭", "<gray>点一下关闭菜单"));
 
         player.openInventory(inventory);
+    }
+
+    // ---------------------------------------------------------------- 删除页
+
+    /**
+     * 删除页：只列出<b>当前真的划了</b>的点位。
+     *
+     * <p>不像主菜单那样铺满固定按钮——列一堆"本来就没有"的条目，管理员反而找不到
+     * 自己要删的那一个；而且删完刷新一次，列表会自然缩短。</p>
+     */
+    public void openDelete(Player player) {
+        if (player == null || !player.isOnline() || !player.hasPermission("taketori.admin")) {
+            return;
+        }
+        Holder holder = new Holder(true);
+        Inventory inventory = Bukkit.createInventory(holder, 54,
+                MINI.deserialize("<dark_red>竹取合战 <dark_gray>· <red>删除点位"));
+        holder.bind(inventory);
+
+        ArenaDef def = plugin.arena().selected(player.getUniqueId());
+        if (def == null) {
+            inventory.setItem(22, button(Material.BARRIER, "<red>还没有选中场地",
+                    "<gray>先 <white>/taketori arena setup &lt;id&gt;", ""));
+            inventory.setItem(49, run(Material.ARROW, "<white>返回", "", "taketori sengoku menu"));
+            inventory.setItem(53, button(Material.BARRIER, "<red>关闭", ""));
+            player.openInventory(inventory);
+            return;
+        }
+        var map = def.sengoku();
+        inventory.setItem(4, button(Material.NETHER_STAR, "<red>删除 " + def.id() + " 的点位",
+                "<gray>只列出<white>当前已划</white>的点位",
+                "<dark_gray>当前：" + map.describe()));
+
+        int slot = 9;
+        for (TeamId team : TeamId.values()) {
+            if (map.keep(team) != null) {
+                slot = place(inventory, slot, Material.RED_CONCRETE,
+                        "删除 " + team.display() + " 天守阁",
+                        "taketori sengoku delkeep " + team.key());
+            }
+            if (map.keepDoor(team) != null) {
+                slot = place(inventory, slot, Material.RED_STAINED_GLASS,
+                        "删除 " + team.display() + " 天守阁门前点",
+                        "taketori sengoku delkeepdoor " + team.key());
+            }
+            if (map.jumpPad(team) != null) {
+                slot = place(inventory, slot, Material.HONEY_BLOCK,
+                        "删除 " + team.display() + " 跳跃台",
+                        "taketori sengoku deljumppad " + team.key());
+            }
+        }
+        for (var entry : map.towers().entrySet()) {
+            int index = entry.getKey();
+            slot = place(inventory, slot, Material.STONE_BRICKS,
+                    "删除箭楼 #" + index + "（占领区 + 铜钟 + 守卫点）",
+                    "taketori sengoku deltower " + index);
+        }
+        for (var entry : map.midMinionRegions().entrySet()) {
+            slot = place(inventory, slot, Material.ZOMBIE_HEAD,
+                    "删除中地小兵区 #" + entry.getKey(),
+                    "taketori sengoku delmid " + entry.getKey());
+        }
+        if (slot == 9) {
+            inventory.setItem(22, button(Material.LIME_DYE, "<green>本场地还没有划任何点位",
+                    "<gray>回主菜单去划"));
+        }
+
+        inventory.setItem(49, run(Material.ARROW, "<white>返回主菜单", "", "taketori sengoku menu"));
+        inventory.setItem(53, button(Material.BARRIER, "<red>关闭", "<gray>点一下关闭菜单"));
+        player.openInventory(inventory);
+    }
+
+    /** 在删除页放一个"点击即删"的按钮。 */
+    private int place(Inventory inventory, int slot, Material material, String name, String command) {
+        if (slot >= 45) {
+            return slot;   // 45 往后留给底部按钮
+        }
+        inventory.setItem(slot, run(material, name, "<yellow>▶ 点击删除", command));
+        return slot + 1;
     }
 
     private String roomLine(Player player) {
@@ -212,7 +303,7 @@ public final class SengokuMenu implements Listener {
 
     @EventHandler
     public void onClick(InventoryClickEvent event) {
-        if (!(event.getInventory().getHolder() instanceof Holder)) {
+        if (!(event.getInventory().getHolder() instanceof Holder holder)) {
             return;
         }
         event.setCancelled(true);
@@ -229,7 +320,12 @@ public final class SengokuMenu implements Listener {
             return;
         }
         if (slot == 49) {
+            // 主菜单是"刷新"，删除页是"返回主菜单"，两者都重新打开主菜单
             open(player);
+            return;
+        }
+        if (slot == 41) {
+            openDelete(player);
             return;
         }
         ItemStack clicked = event.getCurrentItem();
@@ -247,6 +343,10 @@ public final class SengokuMenu implements Listener {
                 plugin.getLogger().info("[sengoku-menu] " + player.getName() + " -> /" + toRun);
             }
             player.performCommand(toRun);
+            // 在删除页里删完回到删除页，方便连续删（主菜单的按钮不受影响）
+            if (holder.deletePage && toRun.contains("sengoku del")) {
+                plugin.getServer().getScheduler().runTask(plugin, () -> openDelete(player));
+            }
             return;
         }
         String toFill = meta.getPersistentDataContainer().get(suggestKey, PersistentDataType.STRING);
