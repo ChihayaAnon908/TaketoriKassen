@@ -112,7 +112,20 @@ public final class MatchScoreboard {
 
         // 按显示顺序自上而下组装行文本；排序分 = 行数 - 位置（固定，不随数据变化）
         List<String> lines = new ArrayList<>();
-        if (match.isPve()) {
+        if (match.isSengoku()) {
+            // 战国 3v3：小局比分是这一模式的核心信息，放在侧栏而不是再开一条 BossBar
+            // （冷却条与复活倒计时已经各占一条，再加会三条堆叠）。
+            var session = room.sengoku();
+            objective.displayName(MINI.deserialize("<gold><bold>战国 3v3</bold> <gray>三局两胜"));
+            lines.add("第 " + Math.max(1, session.currentRound()) + " 小局");
+            lines.add("小局比分: " + session.display());
+            lines.add("红队箭楼: " + room.towers().countOf(TeamId.RED));
+            lines.add("蓝队箭楼: " + room.towers().countOf(TeamId.BLUE));
+            lines.add("你的能量: " + room.energy().energyOf(player)
+                    + "/" + plugin.config().energyRules().safeMax());
+            long left = session.remainingSeconds();
+            lines.add(left < 0L ? "不限时" : "本局剩余: " + (left / 60L) + " 分 " + (left % 60L) + " 秒");
+        } else if (match.isPve()) {
             objective.displayName(MINI.deserialize("<gold><bold>竹取合战 PVE</bold> <gray>目标 "
                     + match.rules().scoreToWin()));
             lines.add("总分: " + match.teamScore(TeamId.RED));

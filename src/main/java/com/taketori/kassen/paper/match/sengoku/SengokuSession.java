@@ -6,6 +6,8 @@ import com.taketori.kassen.core.match.sengoku.RoundResult;
 import com.taketori.kassen.core.match.sengoku.SengokuRules;
 import com.taketori.kassen.core.match.sengoku.SengokuScore;
 import com.taketori.kassen.paper.match.room.GameRoom;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
 /**
@@ -25,6 +27,8 @@ import org.bukkit.scheduler.BukkitTask;
  * </ul>
  */
 public final class SengokuSession {
+
+    private static final MiniMessage MINI = MiniMessage.miniMessage();
 
     private final GameRoom room;
     private final TaketoriPlugin plugin;
@@ -64,6 +68,7 @@ public final class SengokuSession {
         room.broadcast("<yellow>第 <white>" + currentRound + "</white> 小局开始"
                 + " <gray>（当前比分 <white>" + score.display() + "</white>"
                 + "，三局两胜）");
+        showTitle("<yellow>第 " + currentRound + " 小局", "比分 " + score.display());
     }
 
     /**
@@ -82,11 +87,14 @@ public final class SengokuSession {
         if (result.isDraw()) {
             room.broadcast("<gray>第 <white>" + currentRound + "</white> 小局无人获胜"
                     + "（<white>" + result.reason().display() + "</white>）<gray>——本局重开");
+            showTitle("<gray>第 " + currentRound + " 小局平局", "本局重开");
         } else {
             room.broadcast("<green>" + result.winner().display() + " 拿下第 <white>"
                     + currentRound + "</white> 小局"
                     + " <gray>（<white>" + result.reason().display() + "</white>，用时 "
                     + seconds + " 秒）<gray>　比分 <white>" + score.display() + "</white>");
+            showTitle("<green>" + result.winner().display() + " 拿下第 " + currentRound + " 小局",
+                    "比分 " + score.display());
         }
         if (plugin.config().debug()) {
             plugin.getLogger().info("[sengoku] 房间 " + room.id() + " 第 " + currentRound
@@ -103,6 +111,9 @@ public final class SengokuSession {
                     ? "<yellow>整场结束：<gray>双方战平"
                     : "<green>" + matchWinner.display() + " 以 <white>" + score.display()
                             + "</white> 赢得整场！");
+            showTitle(matchWinner == null ? "<yellow>整场战平"
+                            : "<green>" + matchWinner.display() + " 赢得整场",
+                    "最终比分 " + score.display());
             room.finish(matchWinner);
             return;
         }
@@ -188,5 +199,26 @@ public final class SengokuSession {
     /** 房间结束/销毁时停掉计时器。 */
     public void stop() {
         stopTimer();
+    }
+
+    /**
+     * 给全体参赛者放一个 Title。
+     *
+     * <p>小局开始 / 结束这种"整场级的节点"用 Title 比聊天栏更合适：聊天栏会被
+     * 战斗播报冲掉，而 Title 一定在屏幕正中。只发给参赛者，旁观者不受打扰。</p>
+     */
+    private void showTitle(String title, String subtitle) {
+        var titleComponent = MINI.deserialize(title);
+        var subtitleComponent = MINI.deserialize(subtitle);
+        var times = net.kyori.adventure.title.Title.Times.times(
+                java.time.Duration.ofMillis(200L),
+                java.time.Duration.ofMillis(1600L),
+                java.time.Duration.ofMillis(400L));
+        var shown = net.kyori.adventure.title.Title.title(titleComponent, subtitleComponent, times);
+        for (TeamId team : TeamId.values()) {
+            for (Player player : room.teamPlayers(team)) {
+                player.showTitle(shown);
+            }
+        }
     }
 }
