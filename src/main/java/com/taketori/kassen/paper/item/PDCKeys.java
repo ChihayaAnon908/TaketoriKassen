@@ -80,6 +80,14 @@ public final class PDCKeys {
      */
     private static NamespacedKey sengokuBreakerTeam;
 
+    /**
+     * 中地小兵标记（字节 1）。
+     *
+     * <p>用来把它与月人、箭楼守卫、召唤物区分开：只有它才给能量，
+     * 而且它不该参与"击杀月人"的统计。</p>
+     */
+    private static NamespacedKey midMinion;
+
     private PDCKeys() {
     }
 
@@ -121,6 +129,7 @@ public final class PDCKeys {
         summonedOwner = new NamespacedKey(plugin, "summoned_owner");
         towerGuardIndex = new NamespacedKey(plugin, "tower_guard_index");
         sengokuBreakerTeam = new NamespacedKey(plugin, "sengoku_breaker_team");
+        midMinion = new NamespacedKey(plugin, "mid_minion");
 
         projEchoBonus = new NamespacedKey(plugin, "proj_echo_bonus");
         projMarkBonus = new NamespacedKey(plugin, "proj_mark_bonus");
@@ -303,5 +312,10 @@ public final class PDCKeys {
     /** 大将击破器的归属队伍。 */
     public static NamespacedKey sengokuBreakerTeam() {
         return sengokuBreakerTeam;
+    }
+
+    /** 中地小兵标记。 */
+    public static NamespacedKey midMinion() {
+        return midMinion;
     }
 }

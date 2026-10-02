@@ -4,6 +4,7 @@ import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.character.CharacterDef;
 import com.taketori.kassen.core.character.CharacterManager;
 import com.taketori.kassen.core.match.PveSettings;
+import com.taketori.kassen.core.match.sengoku.MidMinionRules;
 import com.taketori.kassen.core.match.sengoku.SengokuMode;
 import com.taketori.kassen.core.match.sengoku.SengokuRules;
 import com.taketori.kassen.core.match.sengoku.SiegeRules;
@@ -59,6 +60,9 @@ public final class ConfigManager {
     /** 战国模式的击破器与跳跃台规则（{@code sengoku-siege.yml}）。 */
     private SiegeRules siegeRules = SiegeRules.defaults();
 
+    /** 战国模式的中地小兵规则（{@code sengoku-minions.yml}）。 */
+    private MidMinionRules midMinionRules = MidMinionRules.defaults();
+
     private int configVersion = 1;
     private boolean debug;
     private boolean actionbar = true;
@@ -111,6 +115,7 @@ public final class ConfigManager {
         parseSengoku(loadYaml("sengoku.yml", false));
         parseTowers(loadYaml("sengoku-towers.yml", false));
         parseSiege(loadYaml("sengoku-siege.yml", false));
+        parseMidMinions(loadYaml("sengoku-minions.yml", false));
 
         YamlConfiguration weaponYaml = loadYaml("weapons.yml", false);
         int templateVersion = weaponYaml.getInt("config-version", 1);
@@ -446,6 +451,31 @@ public final class ConfigManager {
     /** 战国模式的击破器与跳跃台规则（{@code sengoku-siege.yml}）。 */
     public SiegeRules siegeRules() {
         return siegeRules;
+    }
+
+    /** 解析 {@code sengoku-minions.yml}；键全部在根层，逐项回退。 */
+    private void parseMidMinions(YamlConfiguration yaml) {
+        MidMinionRules fallback = MidMinionRules.defaults();
+        if (yaml == null) {
+            midMinionRules = fallback;
+            return;
+        }
+        midMinionRules = new MidMinionRules(
+                yaml.getString("entity", fallback.entity()),
+                yaml.getString("display", fallback.display()),
+                yaml.getInt("interval-seconds", fallback.intervalSeconds()),
+                yaml.getInt("per-spawn", fallback.perSpawn()),
+                yaml.getInt("max-alive", fallback.maxAlive()),
+                yaml.getInt("shard-tick", fallback.shardTick()),
+                yaml.getBoolean("ai-simplify", fallback.aiSimplify()),
+                yaml.getDouble("health", fallback.health()),
+                yaml.getDouble("damage", fallback.damage()),
+                yaml.getInt("score-on-kill", fallback.scoreOnKill()));
+    }
+
+    /** 战国模式的中地小兵规则（{@code sengoku-minions.yml}）。 */
+    public MidMinionRules midMinionRules() {
+        return midMinionRules;
     }
 
     /** 当前对局模式（config.yml 的 {@code match.mode}），认不出回退 PVP。 */
