@@ -6,6 +6,7 @@ import com.taketori.kassen.core.character.CharacterManager;
 import com.taketori.kassen.core.match.PveSettings;
 import com.taketori.kassen.core.match.sengoku.SengokuMode;
 import com.taketori.kassen.core.match.sengoku.SengokuRules;
+import com.taketori.kassen.core.match.sengoku.TowerRules;
 import com.taketori.kassen.core.skill.SkillDef;
 import com.taketori.kassen.core.skill.SkillSlot;
 import com.taketori.kassen.core.skill.ThirdSlotTrigger;
@@ -50,6 +51,9 @@ public final class ConfigManager {
      * 而 PVP / PVE 两条线根本不读它。</p>
      */
     private SengokuRules sengokuRules = SengokuRules.defaults();
+
+    /** 战国模式的箭楼规则（{@code sengoku-towers.yml}）。 */
+    private TowerRules towerRules = TowerRules.defaults();
 
     private int configVersion = 1;
     private boolean debug;
@@ -101,6 +105,7 @@ public final class ConfigManager {
         messages.load(loadYaml("messages.yml", true));
         // 战国模式的对局骨架：不覆盖玩家文件，缺失/写坏都退回默认值
         parseSengoku(loadYaml("sengoku.yml", false));
+        parseTowers(loadYaml("sengoku-towers.yml", false));
 
         YamlConfiguration weaponYaml = loadYaml("weapons.yml", false);
         int templateVersion = weaponYaml.getInt("config-version", 1);
@@ -323,6 +328,65 @@ public final class ConfigManager {
     /** 战国模式的对局骨架规则（{@code sengoku.yml}）。 */
     public SengokuRules sengokuRules() {
         return sengokuRules;
+    }
+
+    /** 解析 {@code sengoku-towers.yml}；逐项回退，与 sengoku.yml 同口径。 */
+    private void parseTowers(YamlConfiguration yaml) {
+        TowerRules fallback = TowerRules.defaults();
+        if (yaml == null) {
+            towerRules = fallback;
+            return;
+        }
+        ConfigurationSection towers = yaml.getConfigurationSection("towers");
+        ConfigurationSection guards = yaml.getConfigurationSection("guards");
+        ConfigurationSection bell = yaml.getConfigurationSection("bell");
+        TowerRules.CaptureMode mode = fallback.captureMode();
+        if (towers != null) {
+            String raw = towers.getString("capture-mode");
+            if (raw != null) {
+                mode = "instant".equalsIgnoreCase(raw.trim())
+                        ? TowerRules.CaptureMode.INSTANT : TowerRules.CaptureMode.CHANNEL;
+            }
+        }
+        towerRules = new TowerRules(
+                towers == null ? fallback.count() : towers.getInt("count", fallback.count()),
+                mode,
+                towers == null ? fallback.captureSeconds()
+                        : towers.getDouble("capture-seconds", fallback.captureSeconds()),
+                towers == null ? fallback.decayPerSecond()
+                        : towers.getDouble("decay-per-second", fallback.decayPerSecond()),
+                towers == null ? fallback.contestLock()
+                        : towers.getBoolean("contest-lock", fallback.contestLock()),
+                towers == null ? fallback.guardRespawnSeconds()
+                        : towers.getInt("guard-respawn-seconds", fallback.guardRespawnSeconds()),
+                parseGuard(guards == null ? null : guards.getConfigurationSection("ox-demon"),
+                        fallback.oxDemon()),
+                parseGuard(guards == null ? null : guards.getConfigurationSection("shrimp-crab"),
+                        fallback.shrimpCrab()),
+                bell == null ? fallback.bellMaterial() : bell.getString("material", fallback.bellMaterial()),
+                bell == null ? fallback.bellSound() : bell.getString("sound", fallback.bellSound()),
+                bell == null ? fallback.bellParticle() : bell.getString("particle", fallback.bellParticle()));
+    }
+
+    /** 单个守卫规格的解析；整段缺失时用默认值。 */
+    private TowerRules.GuardSpec parseGuard(ConfigurationSection section, TowerRules.GuardSpec fallback) {
+        if (section == null) {
+            return fallback;
+        }
+        return new TowerRules.GuardSpec(
+                section.getString("entity", fallback.entity()),
+                section.getString("display", fallback.display()),
+                section.getInt("count", fallback.count()),
+                section.getDouble("health", fallback.health()),
+                section.getDouble("damage", fallback.damage()),
+                section.getInt("speed-amplifier", fallback.speedAmplifier()),
+                section.getDouble("patrol-radius", fallback.patrolRadius()),
+                section.getDouble("aggro-radius", fallback.aggroRadius()));
+    }
+
+    /** 战国模式的箭楼规则（{@code sengoku-towers.yml}）。 */
+    public TowerRules towerRules() {
+        return towerRules;
     }
 
     /** 当前对局模式（config.yml 的 {@code match.mode}），认不出回退 PVP。 */
