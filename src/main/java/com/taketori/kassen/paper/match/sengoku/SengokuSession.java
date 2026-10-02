@@ -147,18 +147,13 @@ public final class SengokuSession {
                 redTowers(), blueTowers(), elapsed));
     }
 
-    /**
-     * 红队当前占领的箭楼数。
-     *
-     * <p>P1 的 {@code TowerManager} 接进来之前恒为 0——所以现在超时只会判平局重开，
-     * 不会误判胜负。接上之后这里改成查归属表。</p>
-     */
+    /** 红队当前占领的箭楼数（超时判定用）。 */
     private int redTowers() {
-        return 0;
+        return room.towers().countOf(TeamId.RED);
     }
 
     private int blueTowers() {
-        return 0;
+        return room.towers().countOf(TeamId.BLUE);
     }
 
     // ---------------------------------------------------------------- 对外查询

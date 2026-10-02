@@ -1,16 +1,20 @@
 package com.taketori.kassen.paper.listener;
 
 import com.taketori.kassen.TaketoriPlugin;
+import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.paper.match.room.GameRoom;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import org.bukkit.Location;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 
 import java.util.List;
 import java.util.Map;
@@ -72,6 +76,70 @@ public final class SengokuListener implements Listener {
             return;
         }
         blocks.removeIf(block -> room.keep().isProtectedBlock(block.getLocation()));
+    }
+
+    /**
+     * 箭楼铜钟：右键敲钟，触发占领读条。
+     *
+     * <p>用<b>点位匹配</b>而不是"全图认材质"：地图上可能本来就摆着装饰用的钟，
+     * 那些不该具备占领功能。</p>
+     *
+     * <p>取消原版交互是因为原版的钟会响一声并产生"钟鸣"效果，与这里的语义冲突——
+     * 由插件统一播报"谁敲响了哪座箭楼"。</p>
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onBellInteract(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        Block block = event.getClickedBlock();
+        if (block == null) {
+            return;
+        }
+        GameRoom room = sengokuRoomOf(event.getPlayer());
+        if (room == null || !room.isRunning()) {
+            return;
+        }
+        int index = towerIndexAtBell(room, block);
+        if (index < 0) {
+            return;
+        }
+        event.setCancelled(true);
+        TeamId team = room.teamOf(event.getPlayer().getUniqueId());
+        if (team == null) {
+            return;   // 旁观者 / 未分队
+        }
+        String failure = room.towerCapture().ringBell(index, team);
+        if (failure != null) {
+            event.getPlayer().sendActionBar(MINI.deserialize("<gray>" + failure));
+        }
+    }
+
+    /** 这个方块是不是某座箭楼的铜钟；不是返回 -1。 */
+    private int towerIndexAtBell(GameRoom room, Block block) {
+        var arena = room.arena();
+        if (arena == null) {
+            return -1;
+        }
+        var map = arena.sengoku();
+        String wanted = plugin.config().towerRules().bellMaterial();
+        if (wanted != null && !wanted.isBlank()
+                && !block.getType().name().equalsIgnoreCase(wanted.trim())) {
+            return -1;
+        }
+        int count = plugin.config().towerRules().safeCount();
+        for (int index = 1; index <= count; index++) {
+            Location bell = map.bell(index) == null ? null : map.bell(index).toBukkitLocation();
+            if (bell == null) {
+                continue;
+            }
+            if (bell.getBlockX() == block.getX()
+                    && bell.getBlockY() == block.getY()
+                    && bell.getBlockZ() == block.getZ()) {
+                return index;
+            }
+        }
+        return -1;
     }
 
     private GameRoom sengokuRoomOf(Player player) {
