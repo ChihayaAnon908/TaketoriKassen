@@ -84,6 +84,10 @@ public final class SiegeBreakerManager {
             }
         }
         dropped.clear();
+        // everSpawned 也要清：它记的是"这一小局发过没有"。
+        // 留着的话，respawn-on-recapture=false 时第 2 局起该队永远拿不到击破器，
+        // 只能靠超时取胜——那是个没人会预期的副作用。
+        everSpawned.clear();
         progress.clear();
         lastLeaveNotice.clear();
     }

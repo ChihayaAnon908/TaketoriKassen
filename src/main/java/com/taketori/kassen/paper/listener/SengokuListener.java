@@ -149,7 +149,13 @@ public final class SengokuListener implements Listener {
         }
     }
 
-    /** 这个方块是不是某座箭楼的铜钟；不是返回 -1。 */
+    /**
+     * 这个方块是不是某座箭楼的铜钟；不是返回 -1。
+     *
+     * <p>匹配用「距离 ≤ 1.5 格」而不是三轴精确相等：写入端存的是方块坐标，
+     * 但铜钟可能由多格组成（钟+底座），也可能被管理员贴着边划——
+     * 精确相等只要差一格就整个占领主线断掉，而这条链路是模式的核心。</p>
+     */
     private int towerIndexAtBell(GameRoom room, Block block) {
         var arena = room.arena();
         if (arena == null) {
@@ -161,15 +167,15 @@ public final class SengokuListener implements Listener {
                 && !block.getType().name().equalsIgnoreCase(wanted.trim())) {
             return -1;
         }
+        Location clicked = block.getLocation();
         int count = plugin.config().towerRules().safeCount();
         for (int index = 1; index <= count; index++) {
             Location bell = map.bell(index) == null ? null : map.bell(index).toBukkitLocation();
-            if (bell == null) {
+            if (bell == null || bell.getWorld() == null
+                    || !bell.getWorld().equals(clicked.getWorld())) {
                 continue;
             }
-            if (bell.getBlockX() == block.getX()
-                    && bell.getBlockY() == block.getY()
-                    && bell.getBlockZ() == block.getZ()) {
+            if (bell.distance(clicked) <= 1.5D) {
                 return index;
             }
         }
@@ -277,11 +283,10 @@ public final class SengokuListener implements Listener {
     /**
      * 击杀中地小兵攒能量（需求第 15 条）。
      *
-     * <p>用 MONITOR 优先级：先让其它监听器（掉落、统计）跑完，这里只做收尾。
-     * 同时清掉落与经验——否则"刷小兵捡装备"会变成另一条套利路径，
-     * 而需求给清兵的回报是<b>能量</b>，不是战利品。</p>
+     * <p>用 HIGHEST 而不是 MONITOR：这里会<b>修改</b>掉落与经验，而 MONITOR 的契约是
+     * 「只观察、不改动」——在 MONITOR 里改事件会让后续监听器看到半改过的状态。</p>
      */
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onMidMinionDeath(EntityDeathEvent event) {
         if (!MidMinionManager.isMidMinion(event.getEntity())) {
             return;

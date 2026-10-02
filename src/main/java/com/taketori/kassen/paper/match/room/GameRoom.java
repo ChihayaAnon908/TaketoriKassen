@@ -1404,6 +1404,17 @@ public final class GameRoom {
         }
         board.updateAll();
 
+        // 开局播报按模式分流：战国模式不看积分、也没有基地保护期，
+        // 沿用 PVP 的"先到 X 分获胜"会直接把玩家引到错误的目标上。
+        if (isSengoku()) {
+            var sengokuRules = plugin.config().sengokuRules();
+            broadcast("<gold><bold>战国 3v3 开始！</bold></gold> <gray>三局两胜，先赢 <white>"
+                    + sengokuRules.winsNeeded() + "</white> 小局者胜；每小局 <white>"
+                    + (sengokuRules.timeLimitSeconds() / 60) + "</white> 分钟。");
+            broadcast("<gray>清掉箭楼守卫 → 敲响铜钟 → 站进占领区读条；"
+                    + "占领后拿大将击破器攻陷敌方天守阁即可赢下本小局。");
+            return;
+        }
         broadcast("<gold><bold>对局开始！</bold></gold> <gray>先到 <white>" + rules().scoreToWin()
                 + "</white> 分获胜，时限 <white>" + (rules().timeLimitSeconds() / 60) + "</white> 分钟。");
         if (isPve()) {
@@ -1502,7 +1513,11 @@ public final class GameRoom {
                 } else {
                     understaffedSinceMillis = 0L;
                 }
-                if (remainingMillis() <= 0L) {
+                // 通用总时限：只对 PVP / PVE 生效。
+                // 战国模式的胜负由小局比分决定（每局 startPlay 会重置计时基准），
+                // 而它从不 addScore、积分恒 0-0——一旦管理员把单局时限配到 ≥ 这个通用时限，
+                // 整场会在中途被按 0-0 平局收掉。小局自己的超时判定在 SengokuSession 里。
+                if (!isSengoku() && remainingMillis() <= 0L) {
                     int redScore = teamScore(TeamId.RED);
                     int blueScore = teamScore(TeamId.BLUE);
                     if (redScore == blueScore) {

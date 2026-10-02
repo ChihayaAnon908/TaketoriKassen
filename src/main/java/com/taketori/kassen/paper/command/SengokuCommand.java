@@ -147,7 +147,15 @@ public final class SengokuCommand {
         setTowerPoint(sender, args, false);
     }
 
-    /** 铜钟与守卫点都是"箭楼上的一个位置"，只是字段不同。 */
+    /**
+     * 铜钟与守卫点都是"箭楼上的一个位置"，但两者的坐标语义<b>不同</b>：
+     * 守卫点是"人站的地方"，铜钟是"被右键的那个方块"。
+     *
+     * <p>铜钟必须存<b>方块坐标</b>——敲钟判定拿存储点与被点击方块做比较，
+     * 存玩家脚坐标永远匹配不到（钟是实心方块，人只能站旁边或上面，三轴必差 1）。
+     * 用 {@code getTargetBlockExact} 取注视方块，与 {@code MatchCommand} 里
+     * 其它"方块精确点位"的做法一致。</p>
+     */
     private void setTowerPoint(CommandSender sender, String[] args, boolean bell) {
         Player player = requirePlayer(sender);
         if (player == null) {
@@ -161,15 +169,25 @@ public final class SengokuCommand {
         if (def == null) {
             return;
         }
+        ArenaDef.Point point;
+        if (bell) {
+            org.bukkit.block.Block target = player.getTargetBlockExact(6);
+            if (target == null || target.getType().isAir()) {
+                send(sender, "<red>请对着铜钟方块再执行（6 格内，需要视线正对它）。");
+                return;
+            }
+            point = ArenaDef.Point.of(target.getLocation());
+        } else {
+            point = ArenaDef.Point.of(player.getLocation());
+        }
         var map = def.sengoku();
-        ArenaDef.Point point = ArenaDef.Point.of(player.getLocation());
         if (bell) {
             map.setTower(index, map.tower(index), point, map.guardSpawn(index));
         } else {
             map.setTower(index, map.tower(index), map.bell(index), point);
         }
         afterEdit(sender, player, def, "箭楼 #" + index + (bell ? " 铜钟" : " 守卫刷新点"),
-                describe(player.getLocation()));
+                describe(point.toBukkitLocation()));
     }
 
     private void setMidMinion(CommandSender sender, String[] args) {
@@ -273,9 +291,11 @@ public final class SengokuCommand {
                 return;
             }
         }
+        // 用本局用时而不是 room.elapsedSeconds()（那是整场起算的）
+        long seconds = room.sengoku().roundElapsedSeconds();
         RoundResult result = winner == null
-                ? RoundResult.draw(RoundResult.Reason.FORCED, room.elapsedSeconds())
-                : new RoundResult(winner, RoundResult.Reason.FORCED, room.elapsedSeconds());
+                ? RoundResult.draw(RoundResult.Reason.FORCED, seconds)
+                : new RoundResult(winner, RoundResult.Reason.FORCED, seconds);
         send(sender, winner == null
                 ? "<green>已强制结束本小局（平局重开）。"
                 : "<green>已强制结束本小局，判 <white>" + winner.display() + "</white> 胜。");

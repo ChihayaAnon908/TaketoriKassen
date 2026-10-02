@@ -15,8 +15,7 @@ import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
-import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.potion.PotionEffect;
+import org.bukkit.persistence.PersistentDataType;import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -262,6 +261,14 @@ public final class TowerManager {
                 retargetGuards(index, state, towerRules);
             }
 
+            // ①c 脱管兜底：守卫所在区块被卸载再加载后，Bukkit.getEntity 拿不到句柄，
+            // state.guards 会被上面的 removeIf 清空——于是 hasGuards() 变 false，
+            // "先清守卫才能占领"这条规则被绕过。守卫集合为空时按 PDC 反向扫描一次，
+            // 把还活着的守卫重新登记回来（每秒一次，只在空的时候扫，开销可控）。
+            if (retargetNow && state.guards.isEmpty()) {
+                readoptGuards(index, state);
+            }
+
             // ② 全灭的瞬间安排重刷，并给两侧播报（"可以去敲钟了"是关键信息）
             if (state.guards.isEmpty() && state.nextRespawnAt == 0L) {
                 state.nextRespawnAt = now + Math.max(1, rules().guardRespawnSeconds()) * 1000L;
@@ -408,13 +415,56 @@ public final class TowerManager {
      * <p>这个配置键此前无人读取——守卫只会被原版 AI 自然触发，箭楼周围实际上"站着不动"。</p>
      */
     private void retargetGuards(int index, TowerState state, TowerRules towerRules) {
-        double radius = Math.max(1.0D, towerRules.oxDemon().aggroRadius());
         for (UUID id : state.guards) {
             Entity entity = Bukkit.getEntity(id);
             if (!(entity instanceof Mob mob) || mob.isDead()) {
                 continue;
             }
-            mob.setTarget(nearestEnemy(mob.getLocation(), radius));
+            mob.setTarget(nearestEnemy(mob.getLocation(), aggroRadiusOf(entity.getType(), towerRules)));
+        }
+    }
+
+    /**
+     * 按实体类型取对应的仇恨半径。
+     *
+     * <p>牛鬼与虾兵蟹将是分开配的，一律用 {@code oxDemon} 的会让
+     * {@code guards.shrimp-crab.aggro-radius} 变成死键。</p>
+     */
+    private double aggroRadiusOf(EntityType type, TowerRules towerRules) {
+        String name = type == null ? "" : type.name();
+        if (name.equalsIgnoreCase(towerRules.shrimpCrab().entity())) {
+            return Math.max(1.0D, towerRules.shrimpCrab().aggroRadius());
+        }
+        if (name.equalsIgnoreCase(towerRules.oxDemon().entity())) {
+            return Math.max(1.0D, towerRules.oxDemon().aggroRadius());
+        }
+        // 认不出类型（实体被换过）：取两者较大的，宁可让守卫积极一点
+        return Math.max(1.0D,
+                Math.max(towerRules.oxDemon().aggroRadius(), towerRules.shrimpCrab().aggroRadius()));
+    }
+
+    /**
+     * 按 PDC 把"本应属于这座箭楼、但已脱离登记表"的守卫重新纳入。
+     *
+     * <p>这就是 {@link PDCKeys#towerGuardIndex()} 存在的意义——否则它只是个只写不读的死键，
+     * 而注释里"跨区块卸载仍认得出自己"的说法也就成了空话。</p>
+     */
+    private void readoptGuards(int index, TowerState state) {
+        ArenaDef.Point spawn = guardSpawnPoint(index);
+        Location center = spawn == null ? null : spawn.toBukkitLocation();
+        if (center == null || center.getWorld() == null) {
+            return;
+        }
+        double radius = Math.max(8.0D, rules().oxDemon().aggroRadius() * 2.0D);
+        for (Entity entity : center.getWorld().getNearbyEntities(center, radius, radius, radius)) {
+            if (!(entity instanceof LivingEntity living) || living.isDead() || !living.isValid()) {
+                continue;
+            }
+            Integer tag = living.getPersistentDataContainer()
+                    .get(PDCKeys.towerGuardIndex(), PersistentDataType.INTEGER);
+            if (tag != null && tag == index) {
+                state.guards.add(living.getUniqueId());
+            }
         }
     }
 

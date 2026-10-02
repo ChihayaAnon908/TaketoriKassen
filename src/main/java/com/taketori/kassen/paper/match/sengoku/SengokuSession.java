@@ -254,6 +254,19 @@ public final class SengokuSession {
     }
 
     /**
+     * 本小局已经打了多少秒。
+     *
+     * <p>与 {@code room.elapsedSeconds()}（整场开局起算）区分：管理员用 {@code endround}
+     * 强制结束时的用时统计应当是本局的，否则第 3 局会显示成"用时 24 分钟"。</p>
+     */
+    public long roundElapsedSeconds() {
+        if (roundStartedAt <= 0L) {
+            return 0L;
+        }
+        return Math.max(0L, (System.currentTimeMillis() - roundStartedAt) / 1000L);
+    }
+
+    /**
      * 给全体参赛者放一个 Title。
      *
      * <p>小局开始 / 结束这种"整场级的节点"用 Title 比聊天栏更合适：聊天栏会被
