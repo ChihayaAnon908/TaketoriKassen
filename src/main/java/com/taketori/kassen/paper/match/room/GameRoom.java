@@ -88,6 +88,16 @@ public final class GameRoom {
     private Phase phase = Phase.WAITING;
     /** 房间模式（每房独立，不再写回全局 config）。 */
     private boolean pve;
+
+    /**
+     * 本房间是否战国 3v3 模式。
+     *
+     * <p>与 {@code pve} 同一个口径：<b>创建时从全局配置快照一次</b>，之后只受
+     * {@link #setMode(String)} 影响。刻意不在 {@link #isSengoku()} 里现读配置——
+     * 那样 {@code /taketori reload} 改一下 {@code match.mode} 就会让<b>正在进行的</b>
+     * 房间瞬间变异（PVP 房突然开始跑战国逻辑），是最难查的一类事故。</p>
+     */
+    private boolean sengoku;
     private MatchRules rules = MatchRules.defaults();
 
     /** WAITING/STARTING 阶段的中立等待者（开局分队后清空，参与者转由 teams 记录）。 */
@@ -210,6 +220,10 @@ public final class GameRoom {
         this.creatorId = creatorId;
         this.createdAt = System.currentTimeMillis();
         this.pve = "pve".equalsIgnoreCase(plugin.getConfig().getString("match.mode", "pvp"));
+        this.sengoku = com.taketori.kassen.core.match.sengoku.SengokuMode
+                .parse(plugin.getConfig().getString("match.mode", "pvp"),
+                        com.taketori.kassen.core.match.sengoku.SengokuMode.PVP)
+                .isSengoku();
         this.minions = new MinionSpawner(this);
         this.baseCapture = new BaseCaptureManager(this);
         this.outpost = new OutpostManager(this);
@@ -295,11 +309,11 @@ public final class GameRoom {
     /**
      * 本房间是否战国 3v3 模式。
      *
-     * <p>当前取自全局 {@code config.yml} 的 {@code match.mode}；等 P0-3 把小局编排接进来后
-     * 会改成每房独立（与 {@code pve} 字段同一个口径）。</p>
+     * <p>读的是创建时的快照（与 {@code pve} 同口径），不是全局配置的实时值——
+     * 所以「改 config.yml 再 reload」只影响之后新建的房间，不会让正在进行的对局变异。</p>
      */
     public boolean isSengoku() {
-        return plugin.config().matchMode().isSengoku();
+        return sengoku;
     }
 
     /** 战国模式的天守阁管理（懒加载）。 */
@@ -447,6 +461,9 @@ public final class GameRoom {
             return "房间已经开始，不能切换模式。";
         }
         this.pve = "pve".equalsIgnoreCase(mode);
+        this.sengoku = com.taketori.kassen.core.match.sengoku.SengokuMode
+                .parse(mode, com.taketori.kassen.core.match.sengoku.SengokuMode.PVP)
+                .isSengoku();
         loadRules();
         return null;
     }
