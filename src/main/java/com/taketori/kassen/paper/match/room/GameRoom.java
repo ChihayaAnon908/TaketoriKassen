@@ -582,6 +582,15 @@ public final class GameRoom {
     }
 
     /**
+     * 对局中掉线且已登记重连会话：只撤记分板，<b>保留</b> teams 条目——
+     * 重连窗口内该位置被占住，重连直接回原队（{@code RejoinManager.tryRejoin}）；
+     * 会话过期后由 {@code RejoinManager.purgeExpired} 调 {@link #quitMatch(UUID)} 释放。
+     */
+    public void quitMatchKeepEntry(UUID uuid) {
+        board.hide(Bukkit.getPlayer(uuid));
+    }
+
+    /**
      * 玩家自助选择队伍（大厅 GUI 的「队伍选择」）。
      * 战斗中不允许换边；PVE 全部并到红队；PVP 队伍满员会被拒绝。
      *
@@ -1073,7 +1082,8 @@ public final class GameRoom {
      * @return 失败原因；成功返回 null
      */
     public String beginMatch(boolean force) {
-        if (phase == Phase.PLAYING || phase == Phase.CAGED) {
+        if (phase == Phase.PLAYING || phase == Phase.CAGED || phase == Phase.ENDING) {
+            // ENDING 也拦：结算延时还挂着 endTask，此时强行重开会被随后的 endCleanup 连新对局一起销毁
             return "房间已经在对局中。";
         }
         // 就绪判定按模式分流：战国地图不必配月人刷新区与基地（那是 PVP/PVE 的要求），
@@ -1371,6 +1381,10 @@ public final class GameRoom {
             return;
         }
         snapshot.restoreTo(player);
+        // 快照里的药水是玩家"开局前自带"的：标记保留，回大厅时 clearTransient 不得洗掉
+        if (snapshot.potions() != null && !snapshot.potions().isEmpty()) {
+            plugin.lobby().preservePotions(player.getUniqueId(), snapshot.potions());
+        }
     }
 
     /** 进入 PLAYING：计时起算、启动房间组件、开局播报。 */
@@ -1458,6 +1472,8 @@ public final class GameRoom {
             return false;
         }
         if (phase == Phase.WAITING || phase == Phase.STARTING) {
+            // 先置 ENDING 再广播：重复调用（理论上房查不到，仍防御）直接走 false，不重复播报
+            phase = Phase.ENDING;
             broadcast("<yellow>房间被管理员解散：" + reason);
             manager.destroyRoom(this, true);
             return true;
@@ -1854,9 +1870,16 @@ public final class GameRoom {
             }
         }
         if (waiting.isEmpty()) {
+            // 失败要把 phase 交还给对局状态机：settle 的第一道守卫会吞掉 WAITING，
+            // 不还原的话调用方的 room.finish() 直接空转，房间卡死在 WAITING。
+            phase = Phase.PLAYING;
             return "没有在线玩家可以继续";
         }
-        return beginMatch(true);
+        String failure = beginMatch(true);
+        if (failure != null) {
+            phase = Phase.PLAYING;
+        }
+        return failure;
     }
 
     /**
@@ -2086,10 +2109,14 @@ public final class GameRoom {
         countdownHalf = false;
         phase = Phase.WAITING;
         board.updateAll();
-        if (plugin.config().debug()) {
-            plugin.getLogger().info("[room " + id() + "] 结算收尾完成，房间即将销毁并回收世界");
+        if (plugin.config().lobbyReturnAfterMatch()) {
+            // 月之都制：结算完成、玩家回到大厅即整场删除并回收世界
+            manager.destroyRoom(this, false);
         }
-        manager.destroyRoom(this, false);
+        // return-after-match=false：玩家留在原地，房间退回等待状态、世界保留——
+        // 此时仍直接销毁的话，世界里有在线玩家，unloadWorld 必然失败，
+        // 世界与文件夹会滞留到下次启动。空房超时（room-empty-dispose-seconds）
+        // 或管理员删除房间时再走正常回收。
     }
 
     /**

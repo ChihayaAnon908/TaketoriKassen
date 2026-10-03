@@ -324,6 +324,12 @@ public final class SengokuCommand {
         if (room == null) {
             return;
         }
+        // 只对进行中的小局生效：CAGED/ENDING 间隙 pause 会"看似成功"，
+        // 实际下一局 onRoundStart 直接复位 paused，管理员以为暂停了其实没有
+        if (!room.isRunning()) {
+            send(sender, "<gray>当前没有进行中的小局，暂停/继续只在对局内有效。");
+            return;
+        }
         if (!room.sengoku().setPaused(paused)) {
             send(sender, "<gray>已经是" + (paused ? "暂停" : "进行") + "状态。");
             return;

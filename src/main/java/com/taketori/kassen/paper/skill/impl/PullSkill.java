@@ -4,6 +4,7 @@ import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.paper.skill.Skill;
 import com.taketori.kassen.paper.skill.SkillContext;
 import com.taketori.kassen.paper.skill.SkillResult;
+import com.taketori.kassen.paper.skill.SkillTargets;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
@@ -177,7 +178,8 @@ public final class PullSkill implements Skill {
             if (!(entity instanceof LivingEntity living) || entity.equals(player) || living.isDead()) {
                 continue;
             }
-            if (entity instanceof Player other && other.getGameMode().name().equals("SPECTATOR")) {
+            // 拉扯是控制效果，友伤处理器拦不住位移，必须在选目标时就按统一口径过滤
+            if (SkillTargets.isFilteredTarget(plugin, player, living)) {
                 continue;
             }
             Vector to = living.getLocation().add(0.0D, living.getHeight() * 0.5D, 0.0D)

@@ -171,6 +171,13 @@ public final class ConfigValidator {
             }
         }
 
+        // default-mode 必须真的存在于 modes：写错的话 WeaponDef.skill(mode) 会静默回退
+        // 武器级技能，表现为"所有模式都出基础技能"，玩家没有任何报错可看
+        if (!weapon.modes().isEmpty() && !weapon.modes().containsKey(weapon.defaultMode())) {
+            problems.add(where + " default-mode \"" + weapon.defaultMode()
+                    + "\" 不在 modes 里（现有: " + String.join("、", weapon.modes().keySet()) + "）");
+        }
+
         Set<String> modes = new LinkedHashSet<>();
         modes.add(weapon.defaultMode());
         modes.addAll(weapon.modes().keySet());

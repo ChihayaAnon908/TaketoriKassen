@@ -81,6 +81,10 @@ public final class RejoinManager {
         GameRoom room = plugin.rooms().room(session.roomId());
         if (room == null || !session.team().equals(room.teamOf(id)) || !room.isRunning()) {
             player.sendMessage(plugin.config().messages().get("rejoin.gone"));
+            // 释放掉线时占住的队伍条目（quitMatchKeepEntry 留下的），让槽位回归补位池
+            if (room != null) {
+                room.quitMatch(id);
+            }
             return false;
         }
         // 恢复房间映射与现场：队伍条目断线时本来就保留，这里补回映射与传送
@@ -114,10 +118,22 @@ public final class RejoinManager {
         }
     }
 
-    /** 由房间 tick 顺带清理过期会话（防长期累积）。 */
+    /** 由房间 tick 顺带清理过期会话（防长期累积），并释放掉线时占住的队伍条目。 */
     public void purgeExpired() {
         long now = System.currentTimeMillis();
-        sessions.values().removeIf(session -> session.expiresAtMillis() < now);
+        Iterator<Map.Entry<UUID, RejoinSession>> iterator = sessions.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<UUID, RejoinSession> entry = iterator.next();
+            if (entry.getValue().expiresAtMillis() >= now) {
+                continue;
+            }
+            iterator.remove();
+            // 掉线玩家没在窗口内回来：释放 quitMatchKeepEntry 留下的队伍条目，槽位回归补位池
+            GameRoom room = plugin.rooms().room(entry.getValue().roomId());
+            if (room != null) {
+                room.quitMatch(entry.getKey());
+            }
+        }
     }
 
     /** 插件卸载时清空。 */

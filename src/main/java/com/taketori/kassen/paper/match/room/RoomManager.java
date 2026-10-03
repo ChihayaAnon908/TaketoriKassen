@@ -1002,9 +1002,36 @@ public final class RoomManager {
                 room.scoreboard().hide(Bukkit.getPlayer(uuid));
             }
         } else {
+            if (phase == GameRoom.Phase.ENDING) {
+                // 结算阶段退房：先还开局前封存的背包，否则玩家会短暂穿着对局装备回大厅
+                Player online = Bukkit.getPlayer(uuid);
+                if (online != null) {
+                    room.restoreInventoryIfAny(online);
+                }
+            }
             // 对局中退出：释放队伍槽位（可被补位），整局成员缓存保留到结算；只撤掉记分板
             room.quitMatch(uuid);
         }
+        return room;
+    }
+
+    /**
+     * 对局中掉线且已登记重连会话的退出路径：与 {@link #leave(UUID)} 相同的解绑，
+     * 但<b>保留</b> teams 条目——重连窗口内位置占住，重连直接回原队；
+     * 会话过期后由 {@code RejoinManager.purgeExpired} 调 {@code quitMatch} 释放。
+     */
+    public GameRoom leaveForRejoin(UUID uuid) {
+        if (uuid == null) {
+            return null;
+        }
+        plugin.characterMenu().cancelForce(uuid);
+        plugin.playerMenu().cancelTeamForce(uuid);
+        GameRoom room = playerRooms.remove(uuid);
+        if (room == null) {
+            return null;
+        }
+        room.removeWaiting(uuid);
+        room.quitMatchKeepEntry(uuid);
         return room;
     }
 

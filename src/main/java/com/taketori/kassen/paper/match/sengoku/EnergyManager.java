@@ -102,25 +102,35 @@ public final class EnergyManager {
         Location center = player.getLocation();
         double radius = Math.max(0.5D, spec.radius());
         List<LivingEntity> targets = SkillTargets.enemiesInRadius(plugin, player, center, radius);
-        for (LivingEntity target : targets) {
-            if (spec.damage() > 0.0D) {
-                target.damage(spec.damage(), player);
-                plugin.damageNumbers().hit(player, target, spec.damage());
-            }
-            Vector push = target.getLocation().toVector().subtract(center.toVector());
-            push.setY(0.0D);
-            if (push.lengthSquared() > 0.0001D) {
-                push.normalize().multiply(spec.knockback()).setY(spec.launch());
-            } else {
-                push = new Vector(0.0D, spec.launch(), 0.0D);
-            }
-            target.setVelocity(target.getVelocity().add(push));
-            if (spec.slowDuration() > 0) {
-                PotionEffectType slow = plugin.versions().potionEffect("SLOWNESS");
-                if (slow != null) {
-                    target.addPotionEffect(new PotionEffect(slow, spec.slowDuration(),
-                            Math.max(0, spec.slowAmplifier()), false, true, true));
+        // 必杀伤害不是玩家近战：打内部标记避免被近战改写监听取消并误派发左键技能
+        if (!targets.isEmpty() && spec.damage() > 0.0D) {
+            plugin.markInternalDamage(player.getUniqueId());
+        }
+        try {
+            for (LivingEntity target : targets) {
+                if (spec.damage() > 0.0D) {
+                    target.damage(spec.damage(), player);
+                    plugin.damageNumbers().hit(player, target, spec.damage());
                 }
+                Vector push = target.getLocation().toVector().subtract(center.toVector());
+                push.setY(0.0D);
+                if (push.lengthSquared() > 0.0001D) {
+                    push.normalize().multiply(spec.knockback()).setY(spec.launch());
+                } else {
+                    push = new Vector(0.0D, spec.launch(), 0.0D);
+                }
+                target.setVelocity(target.getVelocity().add(push));
+                if (spec.slowDuration() > 0) {
+                    PotionEffectType slow = plugin.versions().potionEffect("SLOWNESS");
+                    if (slow != null) {
+                        target.addPotionEffect(new PotionEffect(slow, spec.slowDuration(),
+                                Math.max(0, spec.slowAmplifier()), false, true, true));
+                    }
+                }
+            }
+        } finally {
+            if (!targets.isEmpty() && spec.damage() > 0.0D) {
+                plugin.unmarkInternalDamage(player.getUniqueId());
             }
         }
 

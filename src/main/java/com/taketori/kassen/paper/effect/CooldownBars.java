@@ -74,6 +74,9 @@ public final class CooldownBars {
             }
             for (SkillSlot slot : new ArrayList<>(playerBars.keySet())) {
                 Entry entry = playerBars.get(slot);
+                if (entry == null) {
+                    continue;   // 防御：并发路径刚被 clear 摘掉时不要 NPE
+                }
                 double remaining = (entry.untilMillis() - now) / 1000.0D;
                 if (remaining <= 0.05D) {
                     if (!entry.ready()) {

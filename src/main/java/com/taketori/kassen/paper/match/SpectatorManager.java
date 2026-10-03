@@ -225,7 +225,10 @@ public final class SpectatorManager {
         spectators.remove(uuid);
         audienceRooms.remove(uuid);
         nextReminderAt.remove(uuid);
-        player.setGameMode(GameMode.SURVIVAL);
+        // 只把"因观战被切成旁观"的玩家改回生存：管理员自带创造模式退观战不应被降级
+        if (player.getGameMode() == GameMode.SPECTATOR) {
+            player.setGameMode(GameMode.SURVIVAL);
+        }
         Location target = plugin.lobby().spawn();
         Location fallback = returnPoints.remove(uuid);
         if (target == null) {

@@ -82,8 +82,10 @@ public final class DeployZoneSkill implements Skill {
         BukkitTask task = plugin.scheduler().runTimerTask(() -> {
             // 自清理：玩家下线 / 回了大厅 / 世界被回收（房间销毁）时立即终止，
             // 否则定时任务会一直对着已卸载的世界撒粒子。
-            if (!player.isOnline() || center.getWorld() == null
-                    || plugin.rooms().roomOf(player) == null) {
+            var room = plugin.rooms().roomOf(player);
+            if (!player.isOnline() || center.getWorld() == null || room == null
+                    || room.phase() != com.taketori.kassen.paper.match.room.GameRoom.Phase.PLAYING) {
+                // 领域只属于正式对局：结算/重开/回大厅阶段一律熄火，防止上一局的伤害带进下一局笼内
                 cancel(owner);
                 return;
             }
@@ -94,17 +96,27 @@ public final class DeployZoneSkill implements Skill {
             }
             // 敌人：伤害 + 刷新减速
             List<LivingEntity> enemies = SkillTargets.enemiesInRadius(plugin, player, center, radius);
-            for (LivingEntity enemy : enemies) {
-                if (damage > 0.0D) {
-                    enemy.damage(damage, player);
-                    plugin.damageNumbers().hit(player, enemy, damage);
-                }
-                if (slowDuration > 0) {
-                    PotionEffectType type = plugin.versions().potionEffect(slowType);
-                    if (type != null) {
-                        enemy.addPotionEffect(new PotionEffect(type, slowDuration, slowAmplifier,
-                                false, true, true));
+            if (!enemies.isEmpty() && damage > 0.0D) {
+                // 领域周期伤害不是玩家近战，打上内部标记避免被近战改写监听取消并误派发左键技能
+                plugin.markInternalDamage(player.getUniqueId());
+            }
+            try {
+                for (LivingEntity enemy : enemies) {
+                    if (damage > 0.0D) {
+                        enemy.damage(damage, player);
+                        plugin.damageNumbers().hit(player, enemy, damage);
                     }
+                    if (slowDuration > 0) {
+                        PotionEffectType type = plugin.versions().potionEffect(slowType);
+                        if (type != null) {
+                            enemy.addPotionEffect(new PotionEffect(type, slowDuration, slowAmplifier,
+                                    false, true, true));
+                        }
+                    }
+                }
+            } finally {
+                if (!enemies.isEmpty() && damage > 0.0D) {
+                    plugin.unmarkInternalDamage(player.getUniqueId());
                 }
             }
             // 友方：治疗 + 首次进入给吸收
@@ -114,14 +126,15 @@ public final class DeployZoneSkill implements Skill {
                             || ally.getLocation().distanceSquared(center) > allyRadius * allyRadius) {
                         continue;
                     }
-                    if (!isFriendly(player, ally)) {
+                    if (SkillTargets.isUntargetable(ally) || !isFriendly(player, ally)) {
                         continue;
                     }
                     if (healPerTick > 0.0D && ally.getHealth() < ally.getMaxHealth()) {
                         ally.setHealth(Math.min(ally.getMaxHealth(), ally.getHealth() + healPerTick));
                     }
                     if (absorption > 0.0D && zone.absorbed.add(ally.getUniqueId())) {
-                        ally.setAbsorptionAmount(ally.getAbsorptionAmount() + absorption);
+                        // 多个领域/多次技能的吸收有硬上限，防止无上限叠加
+                        SkillTargets.addAbsorption(ally, absorption);
                     }
                 }
             }

@@ -45,10 +45,11 @@ public final class SetupWandListener implements Listener {
         if (!service.wand().holdingAny(player)) {
             return;
         }
-        event.setCancelled(true);   // 拿着选区锄不许破坏方块
+        // 普通玩家捡到/被塞了一把选区锄时，不能因此被禁挖——只拦管理员
         if (!allowed(player)) {
             return;
         }
+        event.setCancelled(true);   // 拿着选区锄不许破坏方块
         if (player.isSneaking()) {
             service.clear(player);
         } else {

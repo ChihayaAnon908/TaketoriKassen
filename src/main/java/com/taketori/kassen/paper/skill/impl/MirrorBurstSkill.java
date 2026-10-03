@@ -50,6 +50,9 @@ public final class MirrorBurstSkill implements Skill {
             if (!(entity instanceof LivingEntity living) || entity.equals(player) || living.isDead()) {
                 continue;
             }
+            if (SkillTargets.isFilteredTarget(plugin, player, living)) {
+                continue;
+            }
             affected++;
             double applied = damage;
             if (echoBonus > 1.0D && SkillTargets.hasConsumableState(plugin, living)) {

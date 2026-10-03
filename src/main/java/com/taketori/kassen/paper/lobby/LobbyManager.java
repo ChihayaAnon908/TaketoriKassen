@@ -13,6 +13,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -41,6 +42,9 @@ public final class LobbyManager {
     private final List<LobbySign> signs = new CopyOnWriteArrayList<>();
     /** 实时房间状态牌（绑定模板；文本每秒刷新，点击直接加入/旁观/创建）。 */
     private final List<StatusSign> statusSigns = new CopyOnWriteArrayList<>();
+    /** 快照药水保留登记（一次性，clearTransient 消费）：开局前自带的药水不洗掉。 */
+    private final java.util.Map<java.util.UUID, List<PotionEffect>> preservedPotions =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     /** 实时房间状态牌：绑定模板 id 的一个告示牌坐标。 */
     public record StatusSign(String world, int x, int y, int z, String templateId) {
@@ -261,6 +265,13 @@ public final class LobbyManager {
             return;
         }
         if (phase == GameRoom.Phase.CAGED || phase == GameRoom.Phase.PLAYING) {
+            // 参赛者不许从状态牌把自己切成观众：切了就回不了战场（计分/退场/重连全被拒）
+            GameRoom mine = plugin.rooms().roomOf(player);
+            if (mine == room && room.teamOf(player.getUniqueId()) != null) {
+                player.sendMessage(MINI.deserialize("<gray>你正在对局中，不能切换为旁观。"
+                        + "要结束整局请找管理员执行 <white>/taketori match stop"));
+                return;
+            }
             if (plugin.rooms().roomOf(player) == null && room.reinforcementTeam() != null) {
                 joinRoom(player, room.id());
                 return;
@@ -530,12 +541,37 @@ public final class LobbyManager {
         }
     }
 
+    /**
+     * 快照药水保留登记：开局前自带的药水效果被 {@code restoreInventoryIfAny} 还原后登记到这里，
+     * {@link #clearTransient} 只清对局期间获得的临时效果。一次性：下次 clearTransient 消费后失效。
+     */
+    public void preservePotions(java.util.UUID playerId, List<PotionEffect> potions) {
+        if (playerId != null && potions != null && !potions.isEmpty()) {
+            preservedPotions.put(playerId, List.copyOf(potions));
+        }
+    }
+
     /** 清掉药水效果与技能相关状态（进大厅 / 出对局时用）。 */
     public void clearTransient(Player player) {
-        for (PotionEffect effect : new ArrayList<>(player.getActivePotionEffects())) {
-            player.removePotionEffect(effect.getType());
+        // 消费保留登记：快照还原的自带药水跳过，其余（对局期间获得的）全部清掉
+        List<PotionEffect> keep = preservedPotions.remove(player.getUniqueId());
+        java.util.Set<PotionEffectType> keepTypes = new java.util.HashSet<>();
+        if (keep != null) {
+            for (PotionEffect effect : keep) {
+                if (effect != null) {
+                    keepTypes.add(effect.getType());
+                }
+            }
         }
-        player.setAbsorptionAmount(0.0D);
+        for (PotionEffect effect : new ArrayList<>(player.getActivePotionEffects())) {
+            if (!keepTypes.contains(effect.getType())) {
+                player.removePotionEffect(effect.getType());
+            }
+        }
+        PotionEffectType absorption = plugin.versions().potionEffect("ABSORPTION");
+        if (absorption == null || !keepTypes.contains(absorption)) {
+            player.setAbsorptionAmount(0.0D);
+        }
         player.setFireTicks(0);
         player.setFallDistance(0.0F);
     }

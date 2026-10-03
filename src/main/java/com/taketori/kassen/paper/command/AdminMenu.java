@@ -383,8 +383,12 @@ public final class AdminMenu implements Listener {
     private int fillRegions(Inventory inventory, Holder holder, Map<Integer, CuboidRegion> regions,
                             int startSlot, String label, Material material, String kind, String command) {
         int filled = 0;
+        // 超过 9 个时只铺前 8 个：最后一格留给提示纸片。若铺满 9 个再用纸片覆盖第 9 格，
+        // 点击映射还留着——点"还有 N 个未列出"会按映射误删第 9 个区域。
+        boolean overflow = regions.size() > 9;
+        int capacity = overflow ? 8 : 9;
         for (Map.Entry<Integer, CuboidRegion> entry : regions.entrySet()) {
-            if (filled >= 9) {
+            if (filled >= capacity) {
                 break;   // 一行只有 9 格；超出部分用命令删除
             }
             int slot = startSlot + filled;
@@ -395,11 +399,13 @@ public final class AdminMenu implements Listener {
                     "<dark_gray>等价命令：/taketori arena " + command + " " + entry.getKey()));
             filled++;
         }
-        if (regions.size() > filled) {
+        if (overflow) {
             int slot = startSlot + 8;
+            holder.targets().remove(slot);   // 提示纸片不是删除按钮，点击映射必须清掉
             inventory.setItem(slot, button(Material.PAPER, "<yellow>还有 " + (regions.size() - filled) + " 个未列出",
                     "<gray>" + label + " 超过 9 个时只显示前 9 个",
                     "<gray>其余请用命令删除：<white>/taketori arena " + command + " <编号>"));
+            filled = 8;
         }
         // 空位补一层黑玻璃，避免看起来像"还能点"
         for (int slot = startSlot + filled; slot < startSlot + 9; slot++) {

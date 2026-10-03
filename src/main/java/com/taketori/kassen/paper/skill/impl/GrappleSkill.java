@@ -4,6 +4,7 @@ import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.paper.skill.Skill;
 import com.taketori.kassen.paper.skill.SkillContext;
 import com.taketori.kassen.paper.skill.SkillResult;
+import com.taketori.kassen.paper.skill.SkillTargets;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -72,6 +73,10 @@ public final class GrappleSkill implements Skill {
         double bestAngle = Math.toRadians(35.0D);
         for (Entity entity : player.getWorld().getNearbyEntities(eye, range, range, range)) {
             if (!(entity instanceof LivingEntity living) || entity.equals(player) || living.isDead()) {
+                continue;
+            }
+            // 不把受保护的队友/召唤物/笼内玩家当锚点，否则会把玩家拽向这些人
+            if (SkillTargets.isFilteredTarget(plugin, player, living)) {
                 continue;
             }
             Vector to = living.getLocation().add(0.0D, living.getHeight() * 0.5D, 0.0D)

@@ -47,6 +47,13 @@ public final class JumpPadManager {
     private BukkitTask task;
     private long ticks;
 
+    /** 玩家退出对局/服务器时的按人清理（防冷却条目跨局滞留）。 */
+    public void forget(UUID uuid) {
+        if (uuid != null) {
+            cooldowns.remove(uuid);
+        }
+    }
+
     public JumpPadManager(GameRoom room) {
         this.room = room;
         this.plugin = room.plugin();

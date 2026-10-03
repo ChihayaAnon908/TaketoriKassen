@@ -101,7 +101,11 @@ public final class MenuClock {
             player.sendMessage(MINI.deserialize("<gray>你背包里已经有菜单时钟了（右键即可打开菜单）。"));
             return;
         }
-        player.getInventory().addItem(create());
+        if (!player.getInventory().addItem(create()).isEmpty()) {
+            player.sendMessage(MINI.deserialize("<yellow>背包已满，菜单时钟没能发放"
+                    + "<gray>（清出 1 格后再试，或用 /taketori menu 直接打开菜单）"));
+            return;
+        }
         player.sendMessage(MINI.deserialize("<green>已获得菜单时钟 <dark_gray>（右键打开玩家菜单）。"));
     }
 

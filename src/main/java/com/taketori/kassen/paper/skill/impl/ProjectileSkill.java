@@ -132,16 +132,9 @@ public final class ProjectileSkill implements Skill {
                 if (!(nearby instanceof LivingEntity living) || living.equals(shooter) || living.isDead()) {
                     continue;
                 }
-                if (living instanceof Player target && target.getGameMode().name().equals("SPECTATOR")) {
+                // 吸附与伤害同口径：受保护队友/召唤物/笼内玩家都不做吸附目标，避免子弹拐弯打队友
+                if (com.taketori.kassen.paper.skill.SkillTargets.isFilteredTarget(plugin, shooter, living)) {
                     continue;
-                }
-                // 等待区/玻璃笼保护期玩家不做吸附目标（与 ProjectileListener 的伤害豁免一致）
-                if (living instanceof Player protectedPlayer) {
-                    var room = plugin.rooms().roomOf(protectedPlayer);
-                    if (room != null && (room.isCaged(protectedPlayer.getUniqueId())
-                            || (plugin.config().waitingProtect() && room.isProtected(protectedPlayer.getUniqueId())))) {
-                        continue;
-                    }
                 }
                 Vector toTarget = living.getEyeLocation().toVector().subtract(from.toVector());
                 if (toTarget.lengthSquared() < 0.01D) {

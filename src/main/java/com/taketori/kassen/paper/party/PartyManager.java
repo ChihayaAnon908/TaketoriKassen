@@ -109,6 +109,12 @@ public final class PartyManager {
             leader.sendMessage(msg("party.invite-self"));
             return false;
         }
+        // 目标校验放在 ensureParty 之前：否则邀请失败会给发起者留下一个"幽灵单人派对"，
+        // 他自己从此无法被任何人邀请（inParty 拦截），也没有超时清理
+        if (inParty(target.getUniqueId())) {
+            leader.sendMessage(msg("party.target-in-party", "player", target.getName()));
+            return false;
+        }
         Party party = ensureParty(leader);
         // 只有房主能邀请：成员点邀请（指令/GUI）一律拒绝，避免任何人都能往派对里拉人
         if (!party.leader.equals(leader.getUniqueId())) {
@@ -117,10 +123,6 @@ public final class PartyManager {
         }
         if (party.members.size() >= maxSize()) {
             leader.sendMessage(msg("party.full", "max", maxSize()));
-            return false;
-        }
-        if (inParty(target.getUniqueId())) {
-            leader.sendMessage(msg("party.target-in-party", "player", target.getName()));
             return false;
         }
         party.invites.put(target.getUniqueId(), System.currentTimeMillis() + INVITE_TTL_MILLIS);
@@ -196,10 +198,13 @@ public final class PartyManager {
         if (party == null) {
             return;
         }
+        // 退出后是否还有其他成员，要在移除<b>之前</b>判断：
+        // 两人派对房主退出时，先删再判会得到 size==1 → 走解散，剩余成员被无告知踢散
+        boolean hasOthers = party.members.size() > 1;
+        boolean wasLeader = party.leader.equals(uuid);
         party.members.remove(uuid);
         memberToLeader.remove(uuid);
-        boolean wasLeader = party.leader.equals(uuid);
-        if (party.hasOtherMembers()) {
+        if (hasOthers) {
             if (wasLeader) {
                 // 转让房主：最早加入的成员（LinkedHashSet 迭代序 = 加入序）
                 UUID next = party.members.iterator().next();

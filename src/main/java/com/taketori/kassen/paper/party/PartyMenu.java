@@ -182,6 +182,20 @@ public final class PartyMenu implements Listener {
         player.openInventory(inventory);
     }
 
+    /** 邀请页 {@code page}（0 起）是否还有候选玩家（下一页按钮的边界判定用）。 */
+    private boolean hasInviteCandidates(Player player, int page) {
+        int from = page * INVITE_PAGE_SIZE;
+        int count = 0;
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            if (!online.getUniqueId().equals(player.getUniqueId())
+                    && plugin.party().partyOf(online.getUniqueId()) == null
+                    && ++count > from) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private ItemStack candidateHead(UUID id) {
         ItemStack head = new ItemStack(Material.PLAYER_HEAD);
         head.editMeta(SkullMeta.class, meta -> {
@@ -217,7 +231,12 @@ public final class PartyMenu implements Listener {
                         openInvite(player, holder.page - 1);
                     }
                 }
-                case 53 -> openInvite(player, holder.page + 1);
+                case 53 -> {
+                    // 下一页确实存在才翻：空槽 53 被点不该翻进空页（上一页有 page>0 守卫，这里对称）
+                    if (hasInviteCandidates(player, holder.page + 1)) {
+                        openInvite(player, holder.page + 1);
+                    }
+                }
                 case 49 -> openMain(player);
                 default -> {
                     if (slot < INVITE_PAGE_SIZE) {

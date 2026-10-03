@@ -57,6 +57,11 @@ public final class CombatListener implements Listener {
     private static final int VOLLEY_EXTRA_ARROWS = 2;
 
     private final TaketoriPlugin plugin;
+    /** 无箭射击限频：两次补射之间的最小间隔（毫秒）。 */
+    private static final long NO_ARROW_SHOT_INTERVAL_MILLIS = 250L;
+    /** 镜面弹回的速度上限（约等于满蓄弓速）：防止双镜面往复对弹时速度连乘失控。 */
+    private static final double MAX_REFLECT_SPEED = 3.0D;
+    private final java.util.Map<java.util.UUID, Long> lastNoArrowShot = new java.util.HashMap<>();
 
     public CombatListener(TaketoriPlugin plugin) {
         this.plugin = plugin;
@@ -205,7 +210,12 @@ public final class CombatListener implements Listener {
             return;
         }
         event.setCancelled(true);
-        projectile.setVelocity(projectile.getVelocity().multiply(-reflection.speedMultiplier()));
+        // 弹回速度封顶：两个镜面玩家之间往复对弹时速度会按倍率连乘，不封顶会越弹越快
+        Vector bounced = projectile.getVelocity().multiply(-reflection.speedMultiplier());
+        if (bounced.length() > MAX_REFLECT_SPEED) {
+            bounced.normalize().multiply(MAX_REFLECT_SPEED);
+        }
+        projectile.setVelocity(bounced);
         projectile.setShooter(victim);
         plugin.fx().particle("END_ROD", victim.getLocation().add(0.0D, 1.0D, 0.0D), 20, 0.4D);
         plugin.fx().sound("BLOCK_GLASS_BREAK", victim, 0.8F, 1.8F);
@@ -319,7 +329,7 @@ public final class CombatListener implements Listener {
      * 所以只能在右键这一刻接管：手持插件弓 + 手里没箭 → 手动放一支箭，并走与普通射击
      * 完全相同的标记与三连射逻辑；有箭时什么都不做，照旧交给原版。</p>
      */
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBowWithoutArrow(PlayerInteractEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) {
             return;
@@ -343,6 +353,13 @@ public final class CombatListener implements Listener {
         if (hasAnyArrow(player)) {
             return;   // 有箭：走原版 EntityShootBowEvent
         }
+        // 限频：原版拉弓有蓄力时间，连点右键不该变成满威力机关枪
+        long now = System.currentTimeMillis();
+        Long last = lastNoArrowShot.get(player.getUniqueId());
+        if (last != null && now - last < NO_ARROW_SHOT_INTERVAL_MILLIS) {
+            return;
+        }
+        lastNoArrowShot.put(player.getUniqueId(), now);
         // 按满蓄力箭的速度补射（原版满蓄约 3.0），方向取视线
         Arrow arrow = player.launchProjectile(Arrow.class,
                 player.getEyeLocation().getDirection().multiply(3.0D));

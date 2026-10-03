@@ -34,6 +34,11 @@ public final class WeaponEditorListener implements Listener {
         }
         event.setCancelled(true);
         if (event.getWhoClicked() instanceof Player player) {
+            // 纵深防御：入口 /taketori editor 已 admin-gated，这里与 TagMenu/AdminMenu 一致再查一道
+            if (!player.hasPermission("taketori.admin")) {
+                player.closeInventory();
+                return;
+            }
             holder.click(player, event.getRawSlot());
         }
     }

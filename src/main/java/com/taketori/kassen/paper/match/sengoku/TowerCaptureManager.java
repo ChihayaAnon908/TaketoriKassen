@@ -168,24 +168,36 @@ public final class TowerCaptureManager {
                         channel.progress.getOrDefault(team, 0.0D), need, decay));
             }
 
-            TeamId pushing = contest.pushing();
-            if (pushing == null) {
-                continue;   // 无人：进度已按衰减算过
-            }
-            List<Player> pushers = pushing == TeamId.RED ? red : blue;
-            double current = channel.progress.getOrDefault(pushing, 0.0D);
-            for (Player player : pushers) {
-                String bar = SkillManager.progressBar(current, need);
-                int percent = (int) Math.round(current / need * 100.0D);
-                room.scoreboard().actionBar(player, plugin.config().messages().plain(
-                        "sengoku.tower-progress",
-                        "tower", "箭楼 #" + index, "bar", bar, "percent", percent));
+            // 进度条提示：互锁关闭时两队可能同时在读条，各队看各自的进度
+            for (TeamId team : List.of(TeamId.RED, TeamId.BLUE)) {
+                if (!contest.isPresent(team)) {
+                    continue;
+                }
+                double current = channel.progress.getOrDefault(team, 0.0D);
+                for (Player player : (team == TeamId.RED ? red : blue)) {
+                    String bar = SkillManager.progressBar(current, need);
+                    int percent = (int) Math.round(current / need * 100.0D);
+                    room.scoreboard().actionBar(player, plugin.config().messages().plain(
+                            "sengoku.tower-progress",
+                            "tower", "箭楼 #" + index, "bar", bar, "percent", percent));
+                }
             }
 
-            if (contest.isComplete(pushing, current, need)) {
+            // 占领判定按队独立检查：互锁关闭时双方同场各自推进，先读满的一队易主；
+            // 同一 tick 双双读满时进度相同，按红队先手结算（枚举顺序）
+            TeamId winner = null;
+            double winnerProgress = -1.0D;
+            for (TeamId team : TeamId.values()) {
+                double current = channel.progress.getOrDefault(team, 0.0D);
+                if (contest.isComplete(team, current, need) && current > winnerProgress) {
+                    winner = team;
+                    winnerProgress = current;
+                }
+            }
+            if (winner != null) {
                 channel.armed = false;
                 channel.progress.clear();
-                room.towers().capture(index, pushing);
+                room.towers().capture(index, winner);
             }
         }
     }

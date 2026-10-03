@@ -28,6 +28,17 @@ public final class SkillTargets {
     private SkillTargets() {
     }
 
+    /** 吸收（金心）叠加硬上限（点数）：多个技能/领域反复给吸收时的统一闸门，防止无限叠。 */
+    public static final double ABSORPTION_CAP = 20.0D;
+
+    /** 给目标叠加吸收金心，封顶 {@link #ABSORPTION_CAP}。 */
+    public static void addAbsorption(LivingEntity target, double amount) {
+        if (target == null || amount <= 0.0D) {
+            return;
+        }
+        target.setAbsorptionAmount(Math.min(ABSORPTION_CAP, target.getAbsorptionAmount() + amount));
+    }
+
     /**
      * 对方是不是"受友伤保护的同队队友"：是则整个目标跳过——
      * 伤害事件会被友伤处理器取消，但击退 / 减速 / 标记等控制效果不会，必须在这里拦截。
@@ -75,9 +86,24 @@ public final class SkillTargets {
      */
     public static boolean isFilteredTarget(TaketoriPlugin plugin, Player caster, LivingEntity target) {
         if (target instanceof Player other) {
-            return isUntargetable(other) || isProtectedTeammate(plugin, caster, other);
+            return isUntargetable(other) || isProtectedTeammate(plugin, caster, other)
+                    || isProtectionShielded(plugin, other);
         }
         return isProtectedSummon(plugin, caster, target);
+    }
+
+    /**
+     * 目标是否处于笼内冻结或等待区保护期：口径与弹体结算（ProjectileListener）一致——
+     * CAGED 的参赛者必过滤，WAITING/STARTING 的等待者仅在 waitingProtect 开启时过滤。
+     * 是则整个目标跳过（伤害、击退、状态都不施加），否则笼内玩家会被范围技能直接打中。
+     */
+    public static boolean isProtectionShielded(TaketoriPlugin plugin, Player target) {
+        var room = plugin.rooms().roomOf(target);
+        if (room == null) {
+            return false;
+        }
+        return room.isCaged(target.getUniqueId())
+                || (plugin.config().waitingProtect() && room.isProtected(target.getUniqueId()));
     }
 
     /** 旁观者（或非存活）跳过。 */
@@ -97,6 +123,12 @@ public final class SkillTargets {
                 continue;
             }
             if (isFilteredTarget(plugin, caster, living)) {
+                continue;
+            }
+            // getNearbyEntities 是立方体包围盒，角落目标最远可达 radius 的 √3 倍，必须再做圆形距离校验
+            Vector toTarget = living.getLocation().add(0.0D, living.getHeight() * 0.5D, 0.0D)
+                    .toVector().subtract(center.toVector());
+            if (toTarget.lengthSquared() > radius * radius) {
                 continue;
             }
             targets.add(living);

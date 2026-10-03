@@ -78,6 +78,14 @@ public final class ArenaSetupSession {
             return null;
         }
         String template = templateName == null || templateName.isBlank() ? id : templateName;
+        // 与 RoomManager.validatedMoonmapName 同一口径的入口校验：
+        // 目录探测虽然只是 isDirectory 不存在穿越风险，但 session 里存的模板名
+        // 会以未校验形态流向 checkTemplateWorld 等处，入口先拦一道保持一致
+        if (!template.matches("[A-Za-z0-9_-]{1,64}")) {
+            admin.sendMessage(plugin.config().messages().get("setup.no-template",
+                    "template", template));
+            return null;
+        }
         File templateDir = new File(new File(plugin.getDataFolder(), "moonmaps"), template);
         if (!templateDir.isDirectory() || !new File(templateDir, "level.dat").isFile()) {
             admin.sendMessage(plugin.config().messages().get("setup.no-template",

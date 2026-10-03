@@ -51,6 +51,10 @@ public final class TowerManager {
         private final Set<UUID> guards = ConcurrentHashMap.newKeySet();
         /** 守卫全灭后安排的重刷时刻（毫秒）；0 = 无需重刷。 */
         private long nextRespawnAt;
+        /** 守卫刷新点缺失：不安排重刷也不播报，避免每周期空转一次"守卫已清空"。 */
+        private boolean noSpawnPoint;
+        /** 各守卫连续拿不到实体句柄的次数（区块卸载宽限计数，超过才认定死亡）。 */
+        private final Map<UUID, Integer> unresolvedTicks = new HashMap<>();
     }
 
     private final GameRoom room;
@@ -59,6 +63,8 @@ public final class TowerManager {
     private BukkitTask task;
     /** tick 计数：索敌之类的低频动作按它节流。 */
     private long ticks;
+    /** 拿不到守卫实体句柄的宽限 tick 数（tick 每 20L 一次，10 次 ≈ 10 秒）。 */
+    private static final int UNRESOLVE_GRACE_TICKS = 10;
 
     public TowerManager(GameRoom room) {
         this.room = room;
@@ -98,6 +104,17 @@ public final class TowerManager {
         }
         towers.clear();
         ticks = 0L;
+        // 兜底清扫：登记表漏掉（历史重复刷/区块时序）的守卫按 PDC 识别移除，
+        // 防止跨小局残留——房间世界跨局保留，漏掉的守卫会带进下一局。
+        // 只在 stop 时做一次全量扫描，不在 tick 里做。
+        if (room.world() != null) {
+            for (Entity entity : room.world().getEntities()) {
+                if (entity.getPersistentDataContainer()
+                        .has(PDCKeys.towerGuardIndex(), PersistentDataType.INTEGER)) {
+                    entity.remove();
+                }
+            }
+        }
     }
 
     // ---------------------------------------------------------------- 归属查询
@@ -250,11 +267,19 @@ public final class TowerManager {
             int index = entry.getKey();
             TowerState state = entry.getValue();
 
-            // ① 摘掉已经死亡 / 失效 / 被清场的守卫
+            // ① 摘掉已经死亡 / 失效 / 被清场的守卫。
+            // 注意"拿不到句柄"≠"已死"：守卫所在区块被卸载时 Bukkit.getEntity 返回 null，
+            // 直接摘除会让 ② 误判"守卫已清空"→ 重刷出双份守卫。这里给宽限计数，
+            // 连续多个 tick（玩家在场时区块几乎不可能一直卸载）仍找不到才认定死亡。
             state.guards.removeIf(id -> {
                 Entity entity = Bukkit.getEntity(id);
-                return entity == null || entity.isDead() || !entity.isValid();
+                if (entity == null) {
+                    return state.unresolvedTicks.merge(id, 1, Integer::sum) > UNRESOLVE_GRACE_TICKS;
+                }
+                state.unresolvedTicks.remove(id);
+                return entity.isDead() || !entity.isValid();
             });
+            state.unresolvedTicks.keySet().removeIf(state.guards::contains);
 
             // ①b 守卫索敌：aggro-radius 内的敌方玩家（此前该配置键无人读取）
             if (retargetNow && !state.guards.isEmpty()) {
@@ -269,8 +294,9 @@ public final class TowerManager {
                 readoptGuards(index, state);
             }
 
-            // ② 全灭的瞬间安排重刷，并给两侧播报（"可以去敲钟了"是关键信息）
-            if (state.guards.isEmpty() && state.nextRespawnAt == 0L) {
+            // ② 全灭的瞬间安排重刷，并给两侧播报（"可以去敲钟了"是关键信息）。
+            // 点位缺失的箭楼不参与：从未刷出过守卫就播报"已清空"纯属误导。
+            if (!state.noSpawnPoint && state.guards.isEmpty() && state.nextRespawnAt == 0L) {
                 state.nextRespawnAt = now + Math.max(1, rules().guardRespawnSeconds()) * 1000L;
                 room.broadcast(plugin.config().messages().plain("sengoku.tower-guards-cleared",
                         "tower", "箭楼 #" + index,
@@ -293,6 +319,7 @@ public final class TowerManager {
     private void spawnGuards(int index, TowerState state) {
         removeGuards(state);
         ArenaDef.Point spawn = guardSpawnPoint(index);
+        state.noSpawnPoint = spawn == null;
         if (spawn == null) {
             // 点位没划：不刷守卫也不报错——doctor 会点名，这里只留调试日志
             if (plugin.config().debug()) {
@@ -379,6 +406,7 @@ public final class TowerManager {
     }
 
     private void removeGuards(TowerState state) {
+        state.unresolvedTicks.clear();
         if (state.guards.isEmpty()) {
             return;
         }

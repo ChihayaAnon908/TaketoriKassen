@@ -379,6 +379,13 @@ public final class PlayerMenu implements Listener {
             player.sendMessage(MINI.deserialize("<red>当前没有进行中的对局，无法旁观。"));
             return;
         }
+        // 参赛者不许把自己切成观众：切了就回不了战场（计分/退场/重连全被拒）
+        var mine = plugin.rooms().roomOf(player);
+        if (mine != null && mine.teamOf(player.getUniqueId()) != null) {
+            player.sendMessage(MINI.deserialize("<gray>你正在对局中，不能切换为旁观。"
+                    + "要结束整局请找管理员执行 <white>/taketori match stop"));
+            return;
+        }
         player.closeInventory();
         plugin.spectator().enterAudience(player, live.spectatorViewPoint(), live);
         player.sendMessage(plugin.config().messages().get("room.spectating", "room", live.display()));

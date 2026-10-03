@@ -5,6 +5,7 @@ import com.taketori.kassen.paper.skill.Skill;
 import com.taketori.kassen.paper.skill.SkillContext;
 import com.taketori.kassen.paper.skill.SkillManager;
 import com.taketori.kassen.paper.skill.SkillResult;
+import com.taketori.kassen.paper.skill.SkillTargets;
 import org.bukkit.entity.Player;
 
 /**
@@ -41,7 +42,7 @@ public final class ReflectSkill implements Skill {
         plugin.states().setReflection(player.getUniqueId(), duration, speedMultiplier, reflectRatio,
                 context.weapon().id());
         if (absorption > 0.0D) {
-            player.setAbsorptionAmount(player.getAbsorptionAmount() + absorption);
+            SkillTargets.addAbsorption(player, absorption);
         }
 
         plugin.fx().actionBar(player, plugin.config().messages().get("skill.mirror-ready",

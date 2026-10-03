@@ -55,6 +55,8 @@ public final class SiegeBreakerManager {
     private final GameRoom room;
     private final TaketoriPlugin plugin;
     private BukkitTask task;
+    /** tick 计数：击破器巡检等低频动作按它节流。 */
+    private long ticks;
 
     public SiegeBreakerManager(GameRoom room) {
         this.room = room;
@@ -84,6 +86,16 @@ public final class SiegeBreakerManager {
             }
         }
         dropped.clear();
+        ticks = 0L;
+        // 兜底：不在登记表里的击破器（背包溢出掉落、死亡掉落等）按 PDC 全场清掉，
+        // 防止跨小局残留给下一局白送读条起点。只在 stop 时做一次，不在 tick 里扫。
+        if (room.world() != null) {
+            for (Item item : room.world().getEntitiesByClass(Item.class)) {
+                if (breakerTeamOf(item.getItemStack()) != null) {
+                    item.remove();
+                }
+            }
+        }
         // everSpawned 也要清：它记的是"这一小局发过没有"。
         // 留着的话，respawn-on-recapture=false 时第 2 局起该队永远拿不到击破器，
         // 只能靠超时取胜——那是个没人会预期的副作用。
@@ -305,6 +317,17 @@ public final class SiegeBreakerManager {
         // 这样 siege-breaker.pick-radius 才真的有效。
         tryPickup(activePlayers);
 
+        // 巡检：把"不在登记表里的地上击破器"重新纳入追踪（死亡掉落、溢出掉落等）。
+        // 不追踪的话 one-per-team 会被绕过，stop() 也清不掉它。每 5 秒扫一次，房间世界很小。
+        if (room.world() != null && (ticks++ % 5L) == 0L) {
+            for (Item item : room.world().getEntitiesByClass(Item.class)) {
+                TeamId team = breakerTeamOf(item.getItemStack());
+                if (team != null && !item.equals(dropped.get(team)) && item.isValid() && !item.isDead()) {
+                    trackDropped(team, item);
+                }
+            }
+        }
+
         for (Player player : activePlayers) {
             TeamId carrier = carriedBreakerTeam(player);
             if (carrier == null) {
@@ -327,7 +350,7 @@ public final class SiegeBreakerManager {
             double current = progress.getOrDefault(player.getUniqueId(), 0.0D) + 1.0D;
             progress.put(player.getUniqueId(), current);
             if (need <= 0.0D) {
-                arm(player, carrier, 0L);
+                arm(player, carrier);
                 return;
             }
             String bar = SkillManager.progressBar(current, need);
@@ -337,7 +360,7 @@ public final class SiegeBreakerManager {
                     "keep", carrier.opposite().display() + " 天守阁",
                     "bar", bar, "percent", percent));
             if (current >= need) {
-                arm(player, carrier, (long) need);
+                arm(player, carrier);
                 return;
             }
         }
@@ -387,9 +410,15 @@ public final class SiegeBreakerManager {
         dropped.remove(team);
         Map<Integer, ItemStack> leftovers = player.getInventory().addItem(stack);
         if (!leftovers.isEmpty()) {
-            // 背包满了：掉回脚边而不是凭空消失——它不可破坏，等队友来捡
+            // 背包满了：掉回脚边而不是凭空消失——它不可破坏，等队友来捡。
+            // 必须立刻重新登记进 dropped，否则这枚不受追踪：
+            // one-per-team 会被绕过（下次占领再刷一枚），stop() 也清不到它。
             for (ItemStack left : leftovers.values()) {
-                player.getWorld().dropItemNaturally(player.getLocation(), left);
+                Item fallen = player.getWorld().dropItemNaturally(player.getLocation(), left);
+                fallen.setUnlimitedLifetime(true);
+                fallen.setCanMobPickup(false);
+                fallen.setGlowing(rules().glow());
+                trackDropped(team, fallen);
             }
         }
         player.updateInventory();
@@ -398,14 +427,29 @@ public final class SiegeBreakerManager {
         plugin.fx().sound("ENTITY_ITEM_PICKUP", player, 1.0F, 1.2F);
     }
 
-    /** 读满：本小局立即判定携带方胜利。 */
-    private void arm(Player player, TeamId team, long seconds) {        progress.remove(player.getUniqueId());
+    /** 把一枚地上击破器登记为某队的现役掉落物（同一队旧的先收掉，维持 one-per-team 语义）。 */
+    private void trackDropped(TeamId team, Item item) {
+        Item previous = dropped.remove(team);
+        if (previous != null && previous.isValid() && !previous.equals(item)) {
+            previous.remove();
+        }
+        dropped.put(team, item);
+    }
+
+    /**
+     * 读满：本小局立即判定携带方胜利。
+     *
+     * <p>回传给 RoundResult 的用时是<b>本小局实际用时</b>（{@code roundElapsedSeconds()}），
+     * 不是读条所需秒数——播报里的 {seconds} 占位符按契约是"这局打了多久"。</p>
+     */
+    private void arm(Player player, TeamId team) {
+        progress.remove(player.getUniqueId());
         room.broadcast(plugin.config().messages().plain("sengoku.breaker-armed",
                 "player", player.getName(),
                 "keep", team.opposite().display() + " 天守阁"));
         plugin.fx().sound("ENTITY_ENDER_DRAGON_GROWL", player.getLocation(), 1.0F, 1.0F);
         room.sengoku().onRoundEnd(new RoundResult(team, RoundResult.Reason.BREAKER_ARMED,
-                Math.max(0L, seconds)));
+                room.sengoku().roundElapsedSeconds()));
     }
 
     private void noticeLeft(Player player, TeamId carrier) {

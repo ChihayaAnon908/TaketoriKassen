@@ -267,8 +267,12 @@ public final class MatchCommand {
             reason = args.length > 3
                     ? String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length))
                     : "管理员结束";
+        } else if (!(sender instanceof Player)) {
+            // 控制台没有"所在房间"可回落：无显式 id 会命中第一个房间，极易误伤
+            send(sender, "<red>控制台必须指定房间 id：<white>/taketori match stop <房间id> [原因]");
+            return;
         } else {
-            target = resolveTargetRoom(sender instanceof Player player ? player : null);
+            target = resolveTargetRoom((Player) sender);
             reason = args.length > 2
                     ? String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length))
                     : "管理员结束";

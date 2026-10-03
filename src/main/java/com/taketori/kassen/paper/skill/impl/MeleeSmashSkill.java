@@ -49,9 +49,21 @@ public class MeleeSmashSkill implements Skill {
         }
 
         double damage = context.dbl("damage", 6.0D);
-        // 连击：短时间内的连续命中让伤害递增（彩叶的剑靠这个吃贴脸）
+        double range = context.dbl("range", 3.0D);
+        double knockback = context.dbl("knockback", 0.35D);
+        int slowDuration = context.integer("slow-duration", 0);
+        int freezeTicks = context.integer("freeze-ticks", 0);
+
+        Location eye = player.getEyeLocation();
+
+        // 目标筛选统一走 SkillTargets（受保护队友 / 召唤物 / 旁观者整个跳过），与其他技能同口径
+        List<LivingEntity> targets = SkillTargets.enemiesInCone(plugin, player, range,
+                context.dbl("angle", 55.0D));
+
+        // 连击：短时间内的连续<b>命中</b>让伤害递增（彩叶的剑靠这个吃贴脸）。
+        // 叠层必须在确认命中之后：空挥不计数，否则对着空气挥也能把连击叠满。
         double comboBonus = context.dbl("combo-bonus", 0.0D);
-        if (comboBonus > 0.0D) {
+        if (!targets.isEmpty() && comboBonus > 0.0D) {
             int stacks = plugin.states().bumpChain(player.getUniqueId(), context.weapon().id(),
                     context.integer("combo-window", 60));
             damage *= 1.0D + stacks * comboBonus;
@@ -71,16 +83,6 @@ public class MeleeSmashSkill implements Skill {
                         .deserialize("<yellow>连击 <white>×" + (stacks + 1) + "</white> <gray>伤害提升"));
             }
         }
-        double range = context.dbl("range", 3.0D);
-        double knockback = context.dbl("knockback", 0.35D);
-        int slowDuration = context.integer("slow-duration", 0);
-        int freezeTicks = context.integer("freeze-ticks", 0);
-
-        Location eye = player.getEyeLocation();
-
-        // 目标筛选统一走 SkillTargets（受保护队友 / 召唤物 / 旁观者整个跳过），与其他技能同口径
-        List<LivingEntity> targets = SkillTargets.enemiesInCone(plugin, player, range,
-                context.dbl("angle", 55.0D));
 
         for (LivingEntity target : targets) {
             // 子类钩子：兑现类技能（echo_consume）在这里按目标身上的前置状态放大伤害

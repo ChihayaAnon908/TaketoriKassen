@@ -5,6 +5,7 @@ import com.taketori.kassen.paper.skill.Skill;
 import com.taketori.kassen.paper.skill.SkillContext;
 import com.taketori.kassen.paper.skill.SkillManager;
 import com.taketori.kassen.paper.skill.SkillResult;
+import com.taketori.kassen.paper.skill.SkillTargets;
 import org.bukkit.entity.Player;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -59,7 +60,7 @@ public final class ShieldGuardSkill implements Skill {
             player.addPotionEffect(new PotionEffect(resistance, duration, amplifier, false, true, true));
         }
         if (absorption > 0.0D) {
-            player.setAbsorptionAmount(player.getAbsorptionAmount() + absorption);
+            SkillTargets.addAbsorption(player, absorption);
         }
 
         // 2.0：护主架势（ally-*）——把增益扩散给半径内的队友，0 = 只护自己
@@ -99,7 +100,7 @@ public final class ShieldGuardSkill implements Skill {
                 ally.addPotionEffect(new PotionEffect(resistance, duration, allyAmplifier, false, true, true));
             }
             if (allyAbsorption > 0.0D) {
-                ally.setAbsorptionAmount(ally.getAbsorptionAmount() + allyAbsorption);
+                SkillTargets.addAbsorption(ally, allyAbsorption);
             }
             plugin.fx().particle(context.str("particle", "ENCHANTED_HIT"),
                     ally.getLocation().add(0.0D, 1.0D, 0.0D), 12, 0.4D);

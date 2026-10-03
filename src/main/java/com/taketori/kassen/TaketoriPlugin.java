@@ -730,11 +730,13 @@ public final class TaketoriPlugin extends JavaPlugin {
     /**
      * 角色专属的开局补给：乃依的弓开一局配 1 支箭。
      *
-     * <p>只在本方法被调用（开局发放 / 对局中换角色补装）时执行一次——开局流程先清空背包，
-     * 不存在重复叠加；乃依的无箭射击（背包没箭也射得出）不受影响，这支箭只是开局备用。</p>
+     * <p>开局流程先清空背包不存在叠加；但<b>对局中切换角色</b>会走到这里
+     * （clearCharacterWeapons 只清插件武器不清箭），所以发新箭前先收掉旧的，
+     * 防止反复切角色无限攒箭。</p>
      */
     private void giveCharacterExtras(Player player, String characterId) {
         if ("noi".equals(characterId)) {
+            player.getInventory().remove(new ItemStack(Material.ARROW));
             player.getInventory().addItem(new ItemStack(Material.ARROW, 1));
         }
     }
@@ -873,6 +875,13 @@ public final class TaketoriPlugin extends JavaPlugin {
         cooldowns.clearPlayer(uuid);
         states.clear(uuid);
         internalDamage.remove(uuid);
+        // 战国房间的按人状态（能量槽、跳跃台冷却）也一并清掉，
+        // 否则中途退出玩家的条目只能等 clearAll / 房间销毁才回收
+        var room = rooms().roomOf(player);
+        if (room != null && room.isSengoku()) {
+            room.energy().forget(uuid);
+            room.jumpPads().forget(uuid);
+        }
         if (skills != null) {
             skills.cooldownBars().clear(uuid);   // 清掉屏幕上残留的冷却条
         }

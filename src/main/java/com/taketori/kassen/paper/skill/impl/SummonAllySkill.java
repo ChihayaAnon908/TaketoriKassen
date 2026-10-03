@@ -150,7 +150,22 @@ public final class SummonAllySkill implements Skill {
             pending.cancel();
         }
         String key = owner.toString();
-        for (org.bukkit.World world : plugin.getServer().getWorlds()) {
+        // 只扫"主人在的世界 + 其房间世界"：全服所有世界×全部实体的主线程扫描，
+        // 实体多时有卡顿尖峰。召唤物只会刷在主人所在的动态房间世界里，其他世界不必扫。
+        java.util.LinkedHashSet<org.bukkit.World> worlds = new java.util.LinkedHashSet<>();
+        Player ownerPlayer = plugin.getServer().getPlayer(owner);
+        var ownerRoom = ownerPlayer == null ? null : plugin.rooms().roomOf(ownerPlayer);
+        if (ownerRoom != null && ownerRoom.world() != null) {
+            worlds.add(ownerRoom.world());
+        }
+        if (ownerPlayer != null && ownerPlayer.isOnline()) {
+            worlds.add(ownerPlayer.getWorld());
+        }
+        if (worlds.isEmpty()) {
+            // 主人离线且无房间（兜底路径，如插件卸载）：才退回全量扫描
+            worlds.addAll(plugin.getServer().getWorlds());
+        }
+        for (org.bukkit.World world : worlds) {
             for (Entity entity : world.getEntities()) {
                 String tagged = entity.getPersistentDataContainer()
                         .get(PDCKeys.summonedOwner(), PersistentDataType.STRING);

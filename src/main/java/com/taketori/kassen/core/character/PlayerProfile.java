@@ -83,8 +83,11 @@ public final class PlayerProfile {
      * 避免同一次挥击被结算两次伤害。
      */
     public boolean markSwing(long tick, String weaponId) {
+        // 差值必须为非负才参与去重：动态房间制下每次对局都是新世界，
+        // gameTime 可能回落到模板基线，负差值会把上一局的旧时间戳误判成"刚挥过"
         boolean duplicate = lastSwingWeapon != null
                 && lastSwingWeapon.equals(weaponId)
+                && tick >= lastSwingTick
                 && tick - lastSwingTick <= 2L;
         lastSwingTick = tick;
         lastSwingWeapon = weaponId;

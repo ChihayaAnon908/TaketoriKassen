@@ -113,7 +113,7 @@ public final class WeaponYamlEditor {
         }
         int parentIndent = indentOf(lines.get(parentIndex));
         int insertAt = blockEnd(lines, parentIndex, parentIndent);
-        String indent = " ".repeat(parentIndent + 2);
+        String indent = childIndentOf(lines, parentIndex, insertAt, parentIndent);
         String key = path.get(path.size() - 1);
         if (comment != null && !comment.isBlank()) {
             lines.add(insertAt, indent + "# " + comment);
@@ -166,6 +166,25 @@ public final class WeaponYamlEditor {
             last = i + 1;
         }
         return last;
+    }
+
+    /**
+     * 新增子键的缩进：取父块内最后一个子行的<b>实际</b>缩进——
+     * 写死 parentIndent+2 在 4 空格缩进的文件里会产出与兄弟键错位的非法 YAML。
+     * 块内没有可参照的子行时才回退 parentIndent+2。
+     */
+    private static String childIndentOf(List<String> lines, int parentIndex, int blockEnd, int parentIndent) {
+        for (int i = blockEnd - 1; i > parentIndex; i--) {
+            String trimmed = lines.get(i).trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                continue;
+            }
+            int indent = indentOf(lines.get(i));
+            if (indent > parentIndent) {
+                return " ".repeat(indent);
+            }
+        }
+        return " ".repeat(parentIndent + 2);
     }
 
     private static int indentOf(String line) {

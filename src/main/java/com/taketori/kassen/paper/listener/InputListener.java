@@ -307,6 +307,18 @@ public final class InputListener implements Listener {
         }
         event.setCancelled(true);
 
+        // 战国模式：能量满时 Q 优先释放必杀技。
+        // 必须在潜行-Q 第三槽与 q-mode 分支【之前】——否则配了 sneak-q 触发时，
+        // 满能量玩家的"潜行+Q"永远出第三槽而不是必杀，配成 none / held-slot 时必杀会被整个吃掉。
+        // 能量没满时 tryUltimate 直接返回 false，Q 完全走原有逻辑。
+        // ultimate-slot 配成 q 以外的值时本接管点整体不生效（当前唯一支持的触发键就是 Q）。
+        var sengokuRoom = plugin.rooms().roomOf(player);
+        if (sengokuRoom != null && sengokuRoom.isSengoku()
+                && plugin.config().energyRules().usesQSlot()
+                && sengokuRoom.energy().tryUltimate(player)) {
+            return;
+        }
+
         // 潜行 + Q → 第三槽技能（q 槽留给模式切换，用潜行区分）
         if (triggers().contains(ThirdSlotTrigger.SNEAK_Q) && player.isSneaking()) {
             logDrop(player, dropped, identity, "潜行 + Q → 派发第三槽技能");
@@ -318,16 +330,6 @@ public final class InputListener implements Listener {
                 ItemStack source = plugin.items().read(hand) != null ? hand : dropped;
                 dispatchThirdSlot(player, source, "潜行 + Q");
             }, 1L);
-            return;
-        }
-
-        // 战国模式：能量满时 Q 优先释放必杀技。
-        // 必须在 q-mode 分支【之前】——否则配成 none / held-slot 时必杀会被整个吃掉；
-        // 也必须在延后派发之前，否则玩家会看到"必杀和模式切换同时发生"。
-        // 能量没满时 tryUltimate 直接返回 false，Q 完全走原有逻辑。
-        var sengokuRoom = plugin.rooms().roomOf(player);
-        if (sengokuRoom != null && sengokuRoom.isSengoku()
-                && sengokuRoom.energy().tryUltimate(player)) {
             return;
         }
 

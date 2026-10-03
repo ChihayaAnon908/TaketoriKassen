@@ -227,17 +227,25 @@ public final class MatchListener implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         plugin.spectator().forgetQuietly(player.getUniqueId());
+        // 队伍信息必须在解绑前取：普通 leave 路径会随 quitMatch 移除 teams 条目
+        GameRoom room = plugin.rooms().roomOf(player.getUniqueId());
+        TeamId team = room == null ? null : room.teamOf(player.getUniqueId());
+        boolean rejoinable = room != null && room.isRunning() && team != null
+                && plugin.rejoin().rejoinSeconds() > 0;
         // 先把进房封存的背包转全局暂存（房间世界随后可能被删除，玩家数据随世界丢失，
         // 重连后由 restoreOfflineBackup 返还），再解除房间映射
         plugin.rooms().stashOfflineBackup(player.getUniqueId());
-        GameRoom room = plugin.rooms().leave(player.getUniqueId());
-        if (room != null && room.isRunning() && room.teamOf(player.getUniqueId()) != null) {
-            // 对局中（含笼内）掉线：登记重连会话，重连时编回原队
-            plugin.rejoin().register(player.getUniqueId(), room, room.teamOf(player.getUniqueId()));
+        if (rejoinable) {
+            // 对局中掉线：保留队伍条目占位，登记重连会话（时限内重连回原房原队）；
+            // 会话过期后由 purgeExpired 释放槽位
+            plugin.rooms().leaveForRejoin(player.getUniqueId());
+            plugin.rejoin().register(player.getUniqueId(), room, team);
+        } else {
+            plugin.rooms().leave(player.getUniqueId());
         }
         if (room != null && plugin.config().debug() && room.isRunning()) {
             plugin.getLogger().info("[room " + room.id() + "] " + player.getName()
-                    + " 退出对局（队伍保留）");
+                    + " 退出对局" + (rejoinable ? "（重连窗口内保留队伍位置）" : "（队伍保留）"));
         }
     }
 
