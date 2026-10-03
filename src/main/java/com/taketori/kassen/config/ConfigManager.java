@@ -4,6 +4,12 @@ import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.character.CharacterDef;
 import com.taketori.kassen.core.character.CharacterManager;
 import com.taketori.kassen.core.match.PveSettings;
+import com.taketori.kassen.core.match.sengoku.EnergyRules;
+import com.taketori.kassen.core.match.sengoku.MidMinionRules;
+import com.taketori.kassen.core.match.sengoku.SengokuMode;
+import com.taketori.kassen.core.match.sengoku.SengokuRules;
+import com.taketori.kassen.core.match.sengoku.SiegeRules;
+import com.taketori.kassen.core.match.sengoku.TowerRules;
 import com.taketori.kassen.core.skill.SkillDef;
 import com.taketori.kassen.core.skill.SkillSlot;
 import com.taketori.kassen.core.skill.ThirdSlotTrigger;
@@ -40,6 +46,26 @@ public final class ConfigManager {
     private final WeaponManager weapons = new WeaponManager();
     private final CharacterManager characters = new CharacterManager();
     private final Messages messages = new Messages();
+
+    /**
+     * 战国 3v3 的对局骨架规则（{@code sengoku.yml}）。
+     *
+     * <p>缺文件或写坏时退回 {@link SengokuRules#defaults()}：战国模式仍能按默认值跑起来，
+     * 而 PVP / PVE 两条线根本不读它。</p>
+     */
+    private SengokuRules sengokuRules = SengokuRules.defaults();
+
+    /** 战国模式的箭楼规则（{@code sengoku-towers.yml}）。 */
+    private TowerRules towerRules = TowerRules.defaults();
+
+    /** 战国模式的击破器与跳跃台规则（{@code sengoku-siege.yml}）。 */
+    private SiegeRules siegeRules = SiegeRules.defaults();
+
+    /** 战国模式的中地小兵规则（{@code sengoku-minions.yml}）。 */
+    private MidMinionRules midMinionRules = MidMinionRules.defaults();
+
+    /** 战国模式的能量槽与必杀技规则（{@code sengoku-energy.yml}）。 */
+    private EnergyRules energyRules = EnergyRules.defaults();
 
     private int configVersion = 1;
     private boolean debug;
@@ -89,6 +115,12 @@ public final class ConfigManager {
         // messages.yml 回填默认键（新文案在旧文件里不存在时会显示成 "skill.xxx" 键名）；
         // weapons / characters 不回填，避免改动用户的数值文件
         messages.load(loadYaml("messages.yml", true));
+        // 战国模式的对局骨架：不覆盖玩家文件，缺失/写坏都退回默认值
+        parseSengoku(loadYaml("sengoku.yml", false));
+        parseTowers(loadYaml("sengoku-towers.yml", false));
+        parseSiege(loadYaml("sengoku-siege.yml", false));
+        parseMidMinions(loadYaml("sengoku-minions.yml", false));
+        parseEnergy(loadYaml("sengoku-energy.yml", false));
 
         YamlConfiguration weaponYaml = loadYaml("weapons.yml", false);
         int templateVersion = weaponYaml.getInt("config-version", 1);
@@ -267,6 +299,266 @@ public final class ConfigManager {
             result.put(key, section.getDouble(key));
         }
         return result;
+    }
+
+    /**
+     * 解析 {@code sengoku.yml} 的对局骨架段。
+     *
+     * <p>逐项回退：整份文件缺失、某个段缺失、某个键写坏，都只影响那一项，其余照常读——
+     * 与武器配置"写错一个键不影响其它武器"的口径一致。</p>
+     */
+    private void parseSengoku(YamlConfiguration yaml) {
+        SengokuRules fallback = SengokuRules.defaults();
+        if (yaml == null) {
+            sengokuRules = fallback;
+            return;
+        }
+        ConfigurationSection rounds = yaml.getConfigurationSection("rounds");
+        ConfigurationSection keep = yaml.getConfigurationSection("keep");
+        SengokuRules.TimeoutWinner timeout = fallback.timeoutWinner();
+        if (rounds != null) {
+            String raw = rounds.getString("timeout-winner");
+            if (raw != null) {
+                timeout = "draw".equalsIgnoreCase(raw.trim())
+                        ? SengokuRules.TimeoutWinner.DRAW
+                        : SengokuRules.TimeoutWinner.TOWER_COUNT;
+            }
+        }
+        sengokuRules = new SengokuRules(
+                rounds == null ? fallback.bestOf()
+                        : rounds.getInt("best-of", fallback.bestOf()),
+                rounds == null ? fallback.timeLimitMinutes()
+                        : rounds.getInt("time-limit-minutes", fallback.timeLimitMinutes()),
+                timeout,
+                keep == null ? fallback.keepInvulnerable()
+                        : keep.getBoolean("invulnerable", fallback.keepInvulnerable()),
+                keep == null ? fallback.keepArmRadius()
+                        : keep.getDouble("arm-radius", fallback.keepArmRadius()),
+                keep == null ? fallback.protectKeepBlocks()
+                        : keep.getBoolean("protect-blocks", fallback.protectKeepBlocks()));
+    }
+
+    /** 战国模式的对局骨架规则（{@code sengoku.yml}）。 */
+    public SengokuRules sengokuRules() {
+        return sengokuRules;
+    }
+
+    /** 解析 {@code sengoku-towers.yml}；逐项回退，与 sengoku.yml 同口径。 */
+    private void parseTowers(YamlConfiguration yaml) {
+        TowerRules fallback = TowerRules.defaults();
+        if (yaml == null) {
+            towerRules = fallback;
+            return;
+        }
+        ConfigurationSection towers = yaml.getConfigurationSection("towers");
+        ConfigurationSection guards = yaml.getConfigurationSection("guards");
+        ConfigurationSection bell = yaml.getConfigurationSection("bell");
+        TowerRules.CaptureMode mode = fallback.captureMode();
+        if (towers != null) {
+            String raw = towers.getString("capture-mode");
+            if (raw != null) {
+                mode = "instant".equalsIgnoreCase(raw.trim())
+                        ? TowerRules.CaptureMode.INSTANT : TowerRules.CaptureMode.CHANNEL;
+            }
+        }
+        towerRules = new TowerRules(
+                towers == null ? fallback.count() : towers.getInt("count", fallback.count()),
+                mode,
+                towers == null ? fallback.captureSeconds()
+                        : towers.getDouble("capture-seconds", fallback.captureSeconds()),
+                towers == null ? fallback.decayPerSecond()
+                        : towers.getDouble("decay-per-second", fallback.decayPerSecond()),
+                towers == null ? fallback.contestLock()
+                        : towers.getBoolean("contest-lock", fallback.contestLock()),
+                towers == null ? fallback.guardRespawnSeconds()
+                        : towers.getInt("guard-respawn-seconds", fallback.guardRespawnSeconds()),
+                parseGuard(guards == null ? null : guards.getConfigurationSection("ox-demon"),
+                        fallback.oxDemon()),
+                parseGuard(guards == null ? null : guards.getConfigurationSection("shrimp-crab"),
+                        fallback.shrimpCrab()),
+                bell == null ? fallback.bellMaterial() : bell.getString("material", fallback.bellMaterial()),
+                bell == null ? fallback.bellSound() : bell.getString("sound", fallback.bellSound()),
+                bell == null ? fallback.bellParticle() : bell.getString("particle", fallback.bellParticle()));
+    }
+
+    /** 单个守卫规格的解析；整段缺失时用默认值。 */
+    private TowerRules.GuardSpec parseGuard(ConfigurationSection section, TowerRules.GuardSpec fallback) {
+        if (section == null) {
+            return fallback;
+        }
+        return new TowerRules.GuardSpec(
+                section.getString("entity", fallback.entity()),
+                section.getString("display", fallback.display()),
+                section.getInt("count", fallback.count()),
+                section.getDouble("health", fallback.health()),
+                section.getDouble("damage", fallback.damage()),
+                section.getInt("speed-amplifier", fallback.speedAmplifier()),
+                section.getDouble("patrol-radius", fallback.patrolRadius()),
+                section.getDouble("aggro-radius", fallback.aggroRadius()));
+    }
+
+    /** 战国模式的箭楼规则（{@code sengoku-towers.yml}）。 */
+    public TowerRules towerRules() {
+        return towerRules;
+    }
+
+    /** 解析 {@code sengoku-siege.yml}；逐项回退，与前两份同口径。 */
+    private void parseSiege(YamlConfiguration yaml) {
+        SiegeRules fallback = SiegeRules.defaults();
+        if (yaml == null) {
+            siegeRules = fallback;
+            return;
+        }
+        ConfigurationSection breaker = yaml.getConfigurationSection("siege-breaker");
+        ConfigurationSection pad = yaml.getConfigurationSection("jump-pad");
+        ConfigurationSection launch = pad == null ? null : pad.getConfigurationSection("launch");
+        SiegeRules.JumpPadSpec padFallback = fallback.jumpPad();
+        SiegeRules.JumpPadSpec padSpec = new SiegeRules.JumpPadSpec(
+                pad == null ? padFallback.mode() : pad.getString("mode", padFallback.mode()),
+                pad == null ? padFallback.target() : pad.getString("target", padFallback.target()),
+                pad == null ? padFallback.specifiedTower()
+                        : pad.getInt("specified-tower", padFallback.specifiedTower()),
+                pad == null ? padFallback.cooldownSeconds()
+                        : pad.getInt("cooldown-seconds", padFallback.cooldownSeconds()),
+                launch == null ? padFallback.power() : launch.getDouble("power", padFallback.power()),
+                launch == null ? padFallback.upward() : launch.getDouble("upward", padFallback.upward()),
+                pad == null ? padFallback.fallImmunityTicks()
+                        : pad.getInt("fall-immunity-ticks", padFallback.fallImmunityTicks()),
+                pad == null ? padFallback.particle() : pad.getString("particle", padFallback.particle()),
+                pad == null ? padFallback.sound() : pad.getString("sound", padFallback.sound()),
+                pad == null ? padFallback.resistanceTicks()
+                        : pad.getInt("resistance-ticks", padFallback.resistanceTicks()));
+        siegeRules = new SiegeRules(
+                breaker == null ? fallback.material() : breaker.getString("material", fallback.material()),
+                breaker == null ? fallback.display() : breaker.getString("name", fallback.display()),
+                breaker == null ? fallback.glow() : breaker.getBoolean("glow", fallback.glow()),
+                breaker == null ? fallback.spawnDistanceFromKeep()
+                        : breaker.getDouble("spawn-distance-from-keep", fallback.spawnDistanceFromKeep()),
+                breaker == null ? fallback.pickRadius()
+                        : breaker.getDouble("pick-radius", fallback.pickRadius()),
+                breaker == null ? fallback.armTimeSeconds()
+                        : breaker.getDouble("arm-time-seconds", fallback.armTimeSeconds()),
+                breaker == null ? fallback.onePerTeam()
+                        : breaker.getBoolean("one-per-team", fallback.onePerTeam()),
+                breaker == null ? fallback.respawnOnRecapture()
+                        : breaker.getBoolean("respawn-on-recapture", fallback.respawnOnRecapture()),
+                breaker == null ? fallback.allowedCharacters()
+                        : breaker.getStringList("allowed-characters"),
+                breaker == null ? fallback.indestructible()
+                        : breaker.getBoolean("indestructible", fallback.indestructible()),
+                breaker == null ? fallback.undroppable()
+                        : breaker.getBoolean("undroppable", fallback.undroppable()),
+                padSpec);
+    }
+
+    /** 战国模式的击破器与跳跃台规则（{@code sengoku-siege.yml}）。 */
+    public SiegeRules siegeRules() {
+        return siegeRules;
+    }
+
+    /** 解析 {@code sengoku-minions.yml}；键全部在根层，逐项回退。 */
+    private void parseMidMinions(YamlConfiguration yaml) {
+        MidMinionRules fallback = MidMinionRules.defaults();
+        if (yaml == null) {
+            midMinionRules = fallback;
+            return;
+        }
+        midMinionRules = new MidMinionRules(
+                yaml.getString("entity", fallback.entity()),
+                yaml.getString("display", fallback.display()),
+                yaml.getInt("interval-seconds", fallback.intervalSeconds()),
+                yaml.getInt("per-spawn", fallback.perSpawn()),
+                yaml.getInt("max-alive", fallback.maxAlive()),
+                yaml.getInt("shard-tick", fallback.shardTick()),
+                yaml.getDouble("health", fallback.health()),
+                yaml.getDouble("damage", fallback.damage()));
+    }
+
+    /** 战国模式的中地小兵规则（{@code sengoku-minions.yml}）。 */
+    public MidMinionRules midMinionRules() {
+        return midMinionRules;
+    }
+
+    /** 解析 {@code sengoku-energy.yml}，含逐角色覆盖表。 */
+    private void parseEnergy(YamlConfiguration yaml) {
+        EnergyRules fallback = EnergyRules.defaults();
+        if (yaml == null) {
+            energyRules = fallback;
+            return;
+        }
+        ConfigurationSection ultimate = yaml.getConfigurationSection("ultimate");
+        EnergyRules.UltimateSpec defaultSpec = parseUltimate(
+                ultimate == null ? null : ultimate.getConfigurationSection("default"),
+                fallback.defaultUltimate());
+        // 逐角色覆盖：键是角色 id，值缺哪项就继承 default（这样只改一个数字也能写得下）
+        Map<String, EnergyRules.UltimateSpec> perCharacter = EnergyRules.newCharacterMap();
+        if (ultimate != null) {
+            for (String key : ultimate.getKeys(false)) {
+                if ("default".equalsIgnoreCase(key)) {
+                    continue;
+                }
+                perCharacter.put(key.trim().toLowerCase(java.util.Locale.ROOT),
+                        parseUltimate(ultimate.getConfigurationSection(key), defaultSpec));
+            }
+        }
+        energyRules = new EnergyRules(
+                yaml.getInt("max", fallback.max()),
+                yaml.getInt("per-minion", fallback.perMinion()),
+                yaml.getInt("per-elite-minion", fallback.perEliteMinion()),
+                parseEnergyDisplay(yaml.getString("display"), fallback.display()),
+                yaml.getString("ultimate-slot", fallback.ultimateSlot()),
+                defaultSpec, perCharacter);
+    }
+
+    private EnergyRules.UltimateSpec parseUltimate(ConfigurationSection section,
+                                                   EnergyRules.UltimateSpec fallback) {
+        if (section == null) {
+            return fallback;
+        }
+        return new EnergyRules.UltimateSpec(
+                section.getString("type", fallback.type()),
+                section.getDouble("damage", fallback.damage()),
+                section.getDouble("radius", fallback.radius()),
+                section.getDouble("knockback", fallback.knockback()),
+                section.getDouble("launch", fallback.launch()),
+                section.getInt("slow-duration", fallback.slowDuration()),
+                section.getInt("slow-amplifier", fallback.slowAmplifier()),
+                section.getString("particle", fallback.particle()),
+                section.getString("sound", fallback.sound()));
+    }
+
+    private EnergyRules.Display parseEnergyDisplay(String raw, EnergyRules.Display fallback) {
+        if (raw == null) {
+            return fallback;
+        }
+        return switch (raw.trim().toLowerCase(java.util.Locale.ROOT)) {
+            case "bossbar" -> EnergyRules.Display.BOSSBAR;
+            case "none" -> EnergyRules.Display.NONE;
+            case "actionbar" -> EnergyRules.Display.ACTIONBAR;
+            default -> fallback;
+        };
+    }
+
+    /** 战国模式的能量槽与必杀技规则（{@code sengoku-energy.yml}）。 */
+    public EnergyRules energyRules() {
+        return energyRules;
+    }
+
+    /** 当前对局模式（config.yml 的 {@code match.mode}），认不出回退 PVP。 */
+    public SengokuMode matchMode() {
+        return SengokuMode.parse(plugin.getConfig().getString("match.mode", "pvp"), SengokuMode.PVP);
+    }
+
+    /**
+     * 写回<b>全局默认</b>模式（config.yml 的 {@code match.mode}）。
+     *
+     * <p>只影响之后<b>新建</b>的房间——模式在房间创建时快照成字段，
+     * 已经在跑的对局不会因为一次切换而变异。要改单个房间用
+     * {@code /taketori match mode <模式> [房间id]}。</p>
+     */
+    public void setMatchMode(SengokuMode mode) {
+        plugin.getConfig().set("match.mode", mode.key());
+        plugin.saveConfig();
     }
 
     public WeaponManager weapons() {

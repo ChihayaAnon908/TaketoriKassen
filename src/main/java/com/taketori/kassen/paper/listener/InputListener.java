@@ -321,6 +321,16 @@ public final class InputListener implements Listener {
             return;
         }
 
+        // 战国模式：能量满时 Q 优先释放必杀技。
+        // 必须在 q-mode 分支【之前】——否则配成 none / held-slot 时必杀会被整个吃掉；
+        // 也必须在延后派发之前，否则玩家会看到"必杀和模式切换同时发生"。
+        // 能量没满时 tryUltimate 直接返回 false，Q 完全走原有逻辑。
+        var sengokuRoom = plugin.rooms().roomOf(player);
+        if (sengokuRoom != null && sengokuRoom.isSengoku()
+                && sengokuRoom.energy().tryUltimate(player)) {
+            return;
+        }
+
         String qMode = plugin.config().qMode();
         logDrop(player, dropped, identity, "Q 键（丢弃已被拦截）q-mode=" + qMode);
         if ("none".equalsIgnoreCase(qMode)) {

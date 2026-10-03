@@ -24,6 +24,7 @@ import com.taketori.kassen.paper.lobby.LobbyListener;
 import com.taketori.kassen.paper.lobby.LobbyManager;
 import com.taketori.kassen.paper.lobby.PlayerMenu;
 import com.taketori.kassen.paper.listener.PlayerListener;
+import com.taketori.kassen.paper.listener.SengokuListener;
 import com.taketori.kassen.paper.listener.SetupWandListener;
 import com.taketori.kassen.paper.listener.WeaponEditorListener;
 import com.taketori.kassen.paper.editor.WeaponEditor;
@@ -125,6 +126,7 @@ public final class TaketoriPlugin extends JavaPlugin {
     private StatsMenu statsMenu;
     /** 管理员菜单（把常用管理指令映射成按钮）。 */
     private AdminMenu adminMenu;
+    private com.taketori.kassen.paper.command.SengokuMenu sengokuMenu;
     /** 隐性标签设置界面（管理员）。 */
     private TagMenu tagMenu;
     /** 隐性标签与权重（config.yml 的 tags 段）。 */
@@ -198,6 +200,7 @@ public final class TaketoriPlugin extends JavaPlugin {
         roomListMenu = new com.taketori.kassen.paper.lobby.RoomListMenu(this);
         statsMenu = new StatsMenu(this);
         adminMenu = new AdminMenu(this);
+        sengokuMenu = new com.taketori.kassen.paper.command.SengokuMenu(this);
         tagMenu = new TagMenu(this);
         // ---- 管理用具：选区锄（左键/右键点方块划区域，带边框可视化）----
         setupWand = new SetupWandService(this, new SetupWand(this));
@@ -221,6 +224,7 @@ public final class TaketoriPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(roomListMenu, this);
         getServer().getPluginManager().registerEvents(statsMenu, this);
         getServer().getPluginManager().registerEvents(adminMenu, this);
+        getServer().getPluginManager().registerEvents(sengokuMenu, this);
         getServer().getPluginManager().registerEvents(tagMenu, this);
         // 每秒驱动全部房间计时（含观战提醒）
         scheduler.runTimerTask(() -> {
@@ -236,6 +240,8 @@ public final class TaketoriPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new CombatListener(this), this);
         getServer().getPluginManager().registerEvents(new ProjectileListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
+        // 战国 3v3：目前只做天守阁保护，后续阶段在这里挂铜钟 / 击破器 / 跳跃台
+        getServer().getPluginManager().registerEvents(new SengokuListener(this), this);
 
         var command = getCommand("taketori");
         if (command != null) {
@@ -318,8 +324,109 @@ public final class TaketoriPlugin extends JavaPlugin {
      * /taketori doctor 的内容：把"按了没反应"的每一个可能环节都报一遍
      * （事件是否到达 → 是不是插件武器 → 角色是否绑定 → 槽位是否绑定技能 → 名字解析是否可用）。
      */
-    public List<String> doctorReport(Player player, boolean includeConfigProblems) {
+    /**
+     * doctor 的「战国 3v3」一节。
+     *
+     * <p>覆盖三类容易静默失效的东西：配置值是否被读到、实体名与材质名能否解析、
+     * 场地里的七类点位是否齐全。前两类失败只会让对应效果"什么都不发生"，
+     * 不报错；第三类失败会让房间开不起来。这三样都必须能一眼看出来。</p>
+     */
+    private List<String> sengokuDoctorLines(boolean includePlaces) {
         List<String> lines = new java.util.ArrayList<>();
+        var rules = config.sengokuRules();
+        lines.add("--- 战国 3v3（三局两胜）---");
+        lines.add("赛制: best-of " + rules.maxRounds() + "（先到 " + rules.winsNeeded()
+                + " 胜）/ 小局 " + rules.timeLimitSeconds() + " 秒 / 超时判 "
+                + (rules.timeoutWinner() == com.taketori.kassen.core.match.sengoku.SengokuRules.TimeoutWinner.TOWER_COUNT
+                        ? "箭楼数（持平重开）" : "平局"));
+        lines.add("天守阁: 不可直接破坏=" + rules.keepInvulnerable()
+                + " 拦截方块与爆炸=" + rules.protectKeepBlocks()
+                + " 击破器读条半径=" + rules.keepArmRadius());
+
+        var towers = config.towerRules();
+        lines.add("箭楼: " + towers.safeCount() + " 座 / 触发=" + towers.captureMode()
+                + " / 读条 " + towers.effectiveCaptureSeconds() + "s"
+                + " / 衰减 " + towers.decayPerSecond() + "/s"
+                + " / 互锁=" + towers.contestLock());
+        lines.add("守卫实体: 牛鬼 " + resolveEntityName(towers.oxDemon().entity(), towers.oxDemon().count())
+                + "｜虾兵蟹将 " + resolveEntityName(towers.shrimpCrab().entity(), towers.shrimpCrab().count()));
+        lines.add("铜钟材质: " + resolveMaterialName(towers.bellMaterial())
+                + "｜音效 " + resolveState(versions.sound(towers.bellSound())));
+
+        var siege = config.siegeRules();
+        lines.add("击破器: 材质 " + resolveMaterialName(siege.material())
+                + " / 读条 " + siege.effectiveArmSeconds() + "s"
+                + " / 不可破坏=" + siege.indestructible()
+                + " / 不可丢弃=" + siege.undroppable()
+                + " / 职业限制=" + (siege.allowedCharacters() == null || siege.allowedCharacters().isEmpty()
+                        ? "全职业" : siege.allowedCharacters().toString()));
+        var pad = siege.jumpPad();
+        lines.add("跳跃台: " + pad.mode() + " → " + pad.target()
+                + (pad.isNearest() ? "" : " #" + pad.specifiedTower())
+                + " / 冷却 " + pad.cooldownSeconds() + "s / 免摔 " + pad.fallImmunityTicks() + "tick");
+
+        var midMinions = config.midMinionRules();
+        lines.add("中地小兵: " + resolveEntityName(midMinions.entity(), 1)
+                + " / 每 " + midMinions.intervalSeconds() + " 秒 " + midMinions.safePerSpawn() + " 只"
+                + " / 上限 " + midMinions.safeMaxAlive()
+                + " / 分片 " + midMinions.shardTick());
+
+        var energy = config.energyRules();
+        var ultimate = energy.ultimateFor(null);
+        lines.add("能量: 上限 " + energy.safeMax() + " / 每只小兵 +" + energy.safePerMinion()
+                + " / 显示 " + energy.display()
+                + " / 释放槽 " + (energy.usesQSlot() ? "Q" : "⚠ " + energy.ultimateSlot() + "（当前只支持 q）"));
+        lines.add("必杀(默认): " + ultimate.type() + " 伤害 " + ultimate.damage()
+                + " 半径 " + ultimate.radius()
+                + " / 已单独配置的角色 " + energy.perCharacter().size() + " 个");
+
+        if (includePlaces) {
+            int required = towers.safeCount();
+            boolean any = false;
+            for (var def : arena().all().values()) {
+                var map = def.sengoku();
+                if (map.isEmpty()) {
+                    continue;   // 非战国地图不报，避免刷屏
+                }
+                any = true;
+                String missing = map.missingHint(required);
+                lines.add("场地 [" + def.id() + "] " + map.describe()
+                        + (missing.isEmpty() ? " ✅ 点位齐全" : " ❌ 还缺：" + missing));
+            }
+            if (!any) {
+                lines.add("场地点位: 还没有任何场地配置战国点位"
+                        + "（用 /taketori sengoku setkeep … 逐项划）");
+            }
+        } else {
+            lines.add("场地点位: 需要管理员权限才能查看");
+        }
+        return lines;
+    }
+
+    /** 实体名能否解析（解析不到只会在刷怪时静默什么都不发生，所以要在这里点名）。 */
+    private String resolveEntityName(String raw, int count) {
+        if (raw == null || raw.isBlank()) {
+            return "未设置 ❌";
+        }
+        try {
+            org.bukkit.entity.EntityType.valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+            return raw + " ×" + count + " ✅";
+        } catch (IllegalArgumentException ex) {
+            return raw + " ×" + count + " ❌ 无法解析";
+        }
+    }
+
+    /** 材质名能否解析。 */
+    private String resolveMaterialName(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "未设置 ❌";
+        }
+        return org.bukkit.Material.matchMaterial(raw.trim()) != null
+                ? raw + " ✅"
+                : raw + " ❌ 无法解析";
+    }
+
+    public List<String> doctorReport(Player player, boolean includeConfigProblems) {        List<String> lines = new java.util.ArrayList<>();
         lines.add("版本 " + pluginVersion() + " / 适配层 " + versions.name());
         lines.add("debug=" + config.debug() + "（用 /taketori debug on 可临时开启）");
         lines.add("已加载 " + config.weapons().size() + " 把武器 / " + config.characters().size()
@@ -327,6 +434,8 @@ public final class TaketoriPlugin extends JavaPlugin {
         lines.add("Q 键行为: q-mode=" + config.qMode() + describeQMode());
         lines.add("config: weapon-slots=" + config.weaponSlots()
                 + " soulbound=" + config.soulbound() + " allow-drop=" + config.allowDrop());
+
+        lines.addAll(sengokuDoctorLines(includeConfigProblems));
 
         lines.add("--- 名字解析（解析失败会让对应效果静默失效）---");
         lines.add("能力探测: attribute=" + versions.supports("registry.attribute")
@@ -889,6 +998,11 @@ public final class TaketoriPlugin extends JavaPlugin {
     /** 管理员菜单（把常用管理指令映射成按钮）。 */
     public AdminMenu adminMenu() {
         return adminMenu;
+    }
+
+    /** 战国 3v3 管理菜单（{@code /taketori sengoku menu}）。 */
+    public com.taketori.kassen.paper.command.SengokuMenu sengokuMenu() {
+        return sengokuMenu;
     }
 
     /** 隐性标签设置界面（管理员）。 */

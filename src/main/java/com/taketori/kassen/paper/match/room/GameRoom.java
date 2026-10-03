@@ -88,6 +88,16 @@ public final class GameRoom {
     private Phase phase = Phase.WAITING;
     /** 房间模式（每房独立，不再写回全局 config）。 */
     private boolean pve;
+
+    /**
+     * 本房间是否战国 3v3 模式。
+     *
+     * <p>与 {@code pve} 同一个口径：<b>创建时从全局配置快照一次</b>，之后只受
+     * {@link #setMode(String)} 影响。刻意不在 {@link #isSengoku()} 里现读配置——
+     * 那样 {@code /taketori reload} 改一下 {@code match.mode} 就会让<b>正在进行的</b>
+     * 房间瞬间变异（PVP 房突然开始跑战国逻辑），是最难查的一类事故。</p>
+     */
+    private boolean sengoku;
     private MatchRules rules = MatchRules.defaults();
 
     /** WAITING/STARTING 阶段的中立等待者（开局分队后清空，参与者转由 teams 记录）。 */
@@ -210,6 +220,10 @@ public final class GameRoom {
         this.creatorId = creatorId;
         this.createdAt = System.currentTimeMillis();
         this.pve = "pve".equalsIgnoreCase(plugin.getConfig().getString("match.mode", "pvp"));
+        this.sengoku = com.taketori.kassen.core.match.sengoku.SengokuMode
+                .parse(plugin.getConfig().getString("match.mode", "pvp"),
+                        com.taketori.kassen.core.match.sengoku.SengokuMode.PVP)
+                .isSengoku();
         this.minions = new MinionSpawner(this);
         this.baseCapture = new BaseCaptureManager(this);
         this.outpost = new OutpostManager(this);
@@ -268,6 +282,104 @@ public final class GameRoom {
     }
 
     /** 是否处于正式战斗阶段（组件 tick / 计分判定用）。 */
+    /** 战国模式的天守阁管理（懒加载：非战国房间永远不会创建它）。 */
+    private com.taketori.kassen.paper.match.sengoku.KeepManager sengokuKeep;
+
+    /** 战国模式的小局编排（懒加载）。 */
+    private com.taketori.kassen.paper.match.sengoku.SengokuSession sengokuSession;
+
+    /** 战国模式的箭楼（懒加载）。 */
+    private com.taketori.kassen.paper.match.sengoku.TowerManager sengokuTowers;
+
+    /** 战国模式的箭楼占领读条（懒加载）。 */
+    private com.taketori.kassen.paper.match.sengoku.TowerCaptureManager sengokuCapture;
+
+    /** 战国模式的大将击破器（懒加载）。 */
+    private com.taketori.kassen.paper.match.sengoku.SiegeBreakerManager sengokuSiege;
+
+    /** 战国模式的跳跃台（懒加载）。 */
+    private com.taketori.kassen.paper.match.sengoku.JumpPadManager sengokuJumpPads;
+
+    /** 战国模式的中地小兵（懒加载）。 */
+    private com.taketori.kassen.paper.match.sengoku.MidMinionManager sengokuMidMinions;
+
+    /** 战国模式的能量槽（懒加载；纯状态，没有 tick）。 */
+    private com.taketori.kassen.paper.match.sengoku.EnergyManager sengokuEnergy;
+
+    /**
+     * 本房间是否战国 3v3 模式。
+     *
+     * <p>读的是创建时的快照（与 {@code pve} 同口径），不是全局配置的实时值——
+     * 所以「改 config.yml 再 reload」只影响之后新建的房间，不会让正在进行的对局变异。</p>
+     */
+    public boolean isSengoku() {
+        return sengoku;
+    }
+
+    /** 战国模式的天守阁管理（懒加载）。 */
+    public com.taketori.kassen.paper.match.sengoku.KeepManager keep() {
+        if (sengokuKeep == null) {
+            sengokuKeep = new com.taketori.kassen.paper.match.sengoku.KeepManager(this);
+        }
+        return sengokuKeep;
+    }
+
+    /** 战国模式的小局编排（懒加载：非战国房间永远不会创建它）。 */
+    public com.taketori.kassen.paper.match.sengoku.SengokuSession sengoku() {
+        if (sengokuSession == null) {
+            sengokuSession = new com.taketori.kassen.paper.match.sengoku.SengokuSession(this);
+        }
+        return sengokuSession;
+    }
+
+    /** 战国模式的箭楼（懒加载）。 */
+    public com.taketori.kassen.paper.match.sengoku.TowerManager towers() {
+        if (sengokuTowers == null) {
+            sengokuTowers = new com.taketori.kassen.paper.match.sengoku.TowerManager(this);
+        }
+        return sengokuTowers;
+    }
+
+    /** 战国模式的箭楼占领读条（懒加载）。 */
+    public com.taketori.kassen.paper.match.sengoku.TowerCaptureManager towerCapture() {
+        if (sengokuCapture == null) {
+            sengokuCapture = new com.taketori.kassen.paper.match.sengoku.TowerCaptureManager(this);
+        }
+        return sengokuCapture;
+    }
+
+    /** 战国模式的大将击破器（懒加载）。 */
+    public com.taketori.kassen.paper.match.sengoku.SiegeBreakerManager siege() {
+        if (sengokuSiege == null) {
+            sengokuSiege = new com.taketori.kassen.paper.match.sengoku.SiegeBreakerManager(this);
+        }
+        return sengokuSiege;
+    }
+
+    /** 战国模式的跳跃台（懒加载）。 */
+    public com.taketori.kassen.paper.match.sengoku.JumpPadManager jumpPads() {
+        if (sengokuJumpPads == null) {
+            sengokuJumpPads = new com.taketori.kassen.paper.match.sengoku.JumpPadManager(this);
+        }
+        return sengokuJumpPads;
+    }
+
+    /** 战国模式的中地小兵（懒加载）。 */
+    public com.taketori.kassen.paper.match.sengoku.MidMinionManager midMinions() {
+        if (sengokuMidMinions == null) {
+            sengokuMidMinions = new com.taketori.kassen.paper.match.sengoku.MidMinionManager(this);
+        }
+        return sengokuMidMinions;
+    }
+
+    /** 战国模式的能量槽（懒加载；纯状态，没有 tick）。 */
+    public com.taketori.kassen.paper.match.sengoku.EnergyManager energy() {
+        if (sengokuEnergy == null) {
+            sengokuEnergy = new com.taketori.kassen.paper.match.sengoku.EnergyManager(this);
+        }
+        return sengokuEnergy;
+    }
+
     public boolean isRunning() {
         return phase == Phase.PLAYING;
     }
@@ -349,6 +461,9 @@ public final class GameRoom {
             return "房间已经开始，不能切换模式。";
         }
         this.pve = "pve".equalsIgnoreCase(mode);
+        this.sengoku = com.taketori.kassen.core.match.sengoku.SengokuMode
+                .parse(mode, com.taketori.kassen.core.match.sengoku.SengokuMode.PVP)
+                .isSengoku();
         loadRules();
         return null;
     }
@@ -951,7 +1066,16 @@ public final class GameRoom {
         if (phase == Phase.PLAYING || phase == Phase.CAGED) {
             return "房间已经在对局中。";
         }
-        if (!arena.isReady()) {
+        // 就绪判定按模式分流：战国地图不必配月人刷新区与基地（那是 PVP/PVE 的要求），
+        // 反过来它有自己的七类点位。两套判定混用会出现「check 说齐全、开局却报缺月人刷新区」
+        // 或者「点位缺一半照样开局、小局主线永远走不通」。
+        if (isSengoku()) {
+            String sengokuMissing = arena.sengoku()
+                    .missingHint(plugin.config().towerRules().safeCount());
+            if (!sengokuMissing.isEmpty()) {
+                return "战国点位未就绪，还缺：" + sengokuMissing;
+            }
+        } else if (!arena.isReady()) {
             return "场地未就绪，还缺：" + arena.missingHint();
         }
         // 锁定名单：只取在线等待者；PVE 全红，PVP 沿用玩家在等待区手动选择的队伍
@@ -1245,23 +1369,52 @@ public final class GameRoom {
         startedAt = System.currentTimeMillis();
         endedAt = 0L;
 
-        minions.start();
-        loot.start();
-        if (isPve()) {
-            baseCapture.stop();   // PVE 没有敌方基地要拆
-            baseMarker.stop();    // 也没有「双方基地」要标
-            String outpostError = outpost.start(plugin.pveSettings());
-            if (outpostError != null) {
-                plugin.getLogger().warning("[pve] 房间 " + id() + " 据点未能生成：" + outpostError);
-                broadcast("<yellow>据点未生成：<gray>" + outpostError);
-            }
-        } else {
-            baseCapture.start();
-            baseMarker.start();
+        // 战国模式：只跑自己的组件，刻意【不】启动月人、道具、基地占点与基地标记。
+        // 那一套会给对局分（addScore）并在达到 score-to-win 时调 finish()，
+        // 而战国模式的胜负只由击破器与超时决定——两套判定并存会让整场被提前结束；
+        // 月人刷新还会与中地小兵叠加成两套怪。非战国房间走原来的分支，一行不变。
+        if (isSengoku()) {
+            sengoku().onRoundStart();
+            towers().start();
+            towerCapture().start();
+            siege().start();
+            jumpPads().start();
+            midMinions().start();
+            minions.stop();
+            loot.stop();
+            baseCapture.stop();
+            baseMarker.stop();
             outpost.stop();
+        } else {
+            minions.start();
+            loot.start();
+            if (isPve()) {
+                baseCapture.stop();   // PVE 没有敌方基地要拆
+                baseMarker.stop();    // 也没有「双方基地」要标
+                String outpostError = outpost.start(plugin.pveSettings());
+                if (outpostError != null) {
+                    plugin.getLogger().warning("[pve] 房间 " + id() + " 据点未能生成：" + outpostError);
+                    broadcast("<yellow>据点未生成：<gray>" + outpostError);
+                }
+            } else {
+                baseCapture.start();
+                baseMarker.start();
+                outpost.stop();
+            }
         }
         board.updateAll();
 
+        // 开局播报按模式分流：战国模式不看积分、也没有基地保护期，
+        // 沿用 PVP 的"先到 X 分获胜"会直接把玩家引到错误的目标上。
+        if (isSengoku()) {
+            var sengokuRules = plugin.config().sengokuRules();
+            broadcast("<gold><bold>战国 3v3 开始！</bold></gold> <gray>三局两胜，先赢 <white>"
+                    + sengokuRules.winsNeeded() + "</white> 小局者胜；每小局 <white>"
+                    + (sengokuRules.timeLimitSeconds() / 60) + "</white> 分钟。");
+            broadcast("<gray>清掉箭楼守卫 → 敲响铜钟 → 站进占领区读条；"
+                    + "占领后拿大将击破器攻陷敌方天守阁即可赢下本小局。");
+            return;
+        }
         broadcast("<gold><bold>对局开始！</bold></gold> <gray>先到 <white>" + rules().scoreToWin()
                 + "</white> 分获胜，时限 <white>" + (rules().timeLimitSeconds() / 60) + "</white> 分钟。");
         if (isPve()) {
@@ -1365,7 +1518,11 @@ public final class GameRoom {
                 } else {
                     understaffedSinceMillis = 0L;
                 }
-                if (remainingMillis() <= 0L) {
+                // 通用总时限：只对 PVP / PVE 生效。
+                // 战国模式的胜负由小局比分决定（每局 startPlay 会重置计时基准），
+                // 而它从不 addScore、积分恒 0-0——一旦管理员把单局时限配到 ≥ 这个通用时限，
+                // 整场会在中途被按 0-0 平局收掉。小局自己的超时判定在 SengokuSession 里。
+                if (!isSengoku() && remainingMillis() <= 0L) {
                     int redScore = teamScore(TeamId.RED);
                     int blueScore = teamScore(TeamId.BLUE);
                     if (redScore == blueScore) {
@@ -1490,6 +1647,25 @@ public final class GameRoom {
         clearSkillProjectiles();
         clearDroppedItems();
         clearSummons();
+        // 战国：小局计时器、箭楼守卫与读条都归这里停（房间收尾 / 重开都会经过本方法）
+        if (sengokuSession != null) {
+            sengokuSession.stop();
+        }
+        if (sengokuTowers != null) {
+            sengokuTowers.stop();
+        }
+        if (sengokuCapture != null) {
+            sengokuCapture.stop();
+        }
+        if (sengokuSiege != null) {
+            sengokuSiege.stop();
+        }
+        if (sengokuJumpPads != null) {
+            sengokuJumpPads.stop();
+        }
+        if (sengokuMidMinions != null) {
+            sengokuMidMinions.stop();
+        }
     }
 
     /**
@@ -1639,6 +1815,76 @@ public final class GameRoom {
     /** 达到目标分 / 时间到。 */
     public void finish(TeamId winnerTeam) {
         settle(winnerTeam, true);
+    }
+
+    /**
+     * 战国模式：小局之间重开（队伍保留，重新进笼开局）。
+     *
+     * <p>{@link #beginMatch(boolean)} 依赖"等待名单"，而小局重开时玩家已经在 {@code teams} 里，
+     * 所以先把参赛者填回 waiting 再复用它——这样传送、建笼、开局播报的既有流程一行都不用改。
+     * 离线者会被 {@code beginMatch} 的名单锁定机制自动剔除，这里不必特殊处理。</p>
+     *
+     * @return 失败原因；成功返回 null
+     */
+    public String restartRound() {
+        // 关键：小局结束时 phase 还停在 PLAYING，而 beginMatch 的第一道门就是
+        // 「房间已经在对局中」。不退这一步，小局重开会【必然】失败——整场会在
+        // 第 1 小局结束时被当成平局收尾，三局两胜与逐局重置全部不可达。
+        // 同一个 tick 内马上会重新开局，不存在"外部看到空房"的窗口。
+        phase = Phase.WAITING;
+        waiting.clear();
+        for (UUID id : teams.keySet()) {
+            Player player = Bukkit.getPlayer(id);
+            // 阵亡观战中的队员也要算进来：他们仍是本局参赛者，小局重开时应当一起回去。
+            // 漏掉的话 beginMatch 的名单锁定会把他们在 teams 里删掉（下一局少人 + 战绩丢失）。
+            if (player != null && player.isOnline()) {
+                waiting.add(id);
+            }
+        }
+        if (waiting.isEmpty()) {
+            return "没有在线玩家可以继续";
+        }
+        return beginMatch(true);
+    }
+
+    /**
+     * 战国模式：清掉上一小局留下的战场状态（小兵、召唤物、掉落物、技能弹体）。
+     *
+     * <p>队伍、比分与跨局战绩<b>不动</b>——它们属于整场而不是某一小局，
+     * 这也是 {@code SengokuScore} 单独成类的原因。</p>
+     */
+    public void resetSengokuBattlefield() {
+        // stopComponents 里已经清过召唤物 / 掉落物 / 技能弹体，这里不再重复调用
+        // （那三个都是全实体扫描，重复两轮纯属浪费）
+        stopComponents();
+        if (sengokuSiege != null) {
+            sengokuSiege.removeFromInventories();
+        }
+        if (sengokuEnergy != null) {
+            sengokuEnergy.clearAll();
+        }
+        clearParticipantCombatState();
+    }
+
+    /**
+     * 清掉参赛者的临时战斗状态与药水效果（需求第 33 条要求重置"临时状态"）。
+     *
+     * <p>不清的话，上一局被挂的减速 / 易伤标记 / 破甲 / 防御窗口 / 连击层数会直接带进
+     * 下一局——玩家在新一局开局就莫名其妙地"被标着""被破着甲"。</p>
+     *
+     * <p>只清参赛者，不碰 {@code CombatStates.clearAll()}（那是全局的，会误伤其它房间）。</p>
+     */
+    private void clearParticipantCombatState() {
+        for (TeamId team : TeamId.values()) {
+            for (Player player : teamPlayers(team)) {
+                plugin.states().clear(player.getUniqueId());
+                for (PotionEffect effect : new ArrayList<>(player.getActivePotionEffects())) {
+                    player.removePotionEffect(effect.getType());
+                }
+                player.setFireTicks(0);
+                player.setFallDistance(0.0F);
+            }
+        }
     }
 
     /**

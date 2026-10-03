@@ -83,6 +83,8 @@ public final class TaketoriCommand implements CommandExecutor, TabCompleter {
                     new MatchCommand(plugin).handle(sender, args);
             // 玩家自助退出：退出观战 / 退出队列（聊天栏的「退出观战」按钮执行的就是它）
             case "leave" -> new MatchCommand(plugin).handleLeave(sender);
+            // 战国 3v3：划区（setkeep / settower / …）与运维（start / pause / towers / …）
+            case "sengoku" -> new SengokuCommand(plugin).handle(sender, args);
             // 玩家发起/确认本队投降（对局中；半数以上在线队友同意即结束）
             case "surrender" -> new MatchCommand(plugin).handleSurrender(sender);
             // 武器数据编辑 GUI（管理员）

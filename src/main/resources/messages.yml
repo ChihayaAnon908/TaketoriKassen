@@ -61,7 +61,47 @@ skill:
   grapple-miss: '<gray>钢丝落空。'
   boost-defly: '<yellow>已取消飞行状态（飞行时推进不会生效）'
   shockwave-none: '<gray>冲击波没有命中的目标（<white>{radius}</white> 格内没有敌人）'
+
+# ── 战国 3v3（三局两胜）──────────────────────────────────
+sengoku:
+  keep-protected: '<red>天守阁不可直接破坏 <gray>——用大将击破器'
   freeze-applied: '<aqua>已冻结 <white>{target}</white></aqua> <gray>{time}s'
+  # 小局流程
+  round-start: '<yellow>第 <white>{round}</white> 小局开始 <gray>（当前比分 <white>{score}</white>，三局两胜）'
+  round-draw: '<gray>第 <white>{round}</white> 小局无人获胜（<white>{reason}</white>）<gray>——本局重开'
+  round-won: '<green>{team} 拿下第 <white>{round}</white> 小局 <gray>（<white>{reason}</white>，用时 {seconds} 秒）<gray>　比分 <white>{score}</white>'
+  match-won: '<green>{team} 以 <white>{score}</white> 赢得整场！'
+  match-draw: '<yellow>整场结束：<gray>双方战平'
+  round-restart-failed: '<yellow>下一小局无法开始（<white>{reason}</white>），本场提前结束'
+  paused: '<yellow>对局已由管理员暂停'
+  resumed: '<green>对局已继续'
+  # 箭楼
+  tower-captured: '<yellow>⚑ {team} 占领了 {tower}</yellow>{previous}'
+  tower-previous: ' <gray>（原属 {team}）'
+  tower-guards-cleared: '<green>{tower} 的守卫已被肃清<gray>——{seconds} 秒内敲响铜钟即可占领'
+  tower-guards-alive: '<gray>先清掉箭楼附近的守卫（剩余 {count}）'
+  tower-already-yours: '<gray>这座箭楼已经属于你们。'
+  tower-bell-rung: '<yellow>{team} 敲响了 {tower} 的铜钟<gray>——站进占领区读条'
+  tower-contested: '<red>箭楼争夺中 <gray>——双方进度停滞，先把对面赶出去'
+  tower-progress: '<yellow>占领 {tower}</yellow> <gray>{bar} <white>{percent}%'
+  # 大将击破器
+  breaker-spawned: '<gold>大将击破器已出现在 {keep} <gray>——{team} 可取'
+  breaker-picked: '<gold>已拾取大将击破器 <gray>——带到 {keep} 范围内读条'
+  breaker-armed: '<gold>{player} 用大将击破器攻陷了 {keep}！'
+  breaker-progress: '<gold>破坏 {keep}</gold> <gray>{bar} <white>{percent}%'
+  breaker-leave: '<gray>带着击破器进入 {keep} 范围内才能开始破坏'
+  breaker-undroppable: '<red>大将击破器不能丢弃 <gray>——只能带着，或阵亡时掉落'
+  breaker-unconsumable: '<red>大将击破器不能被消耗 <gray>——它只用来破坏敌方天守阁'
+  breaker-not-yours: '<red>这是 {team} 的击破器'
+  breaker-role-blocked: '<red>该角色无法操作大将击破器 <gray>——交给队友'
+  # 跳跃台
+  jumppad-ready: '<green>{team} 的跳跃台已出现在己方天守阁门前<gray>——复活后踩上去即可直达已占领的箭楼'
+  jumppad-no-target: '<gray>暂时没有可前往的己方箭楼'
+  # 能量与必杀
+  energy-full: '<gold>能量已满 <gray>——按 <white>Q</white> 释放必杀技'
+  energy-bar: '<aqua>能量 {bar} <white>{current}/{max}'
+  ultimate-cast: '<gold>必杀技已释放 <gray>——能量清空，继续攒'
+  ultimate-broadcast: '<gold>{player} 释放了必杀技 <gray>（命中 {count} 个目标）'
 
 # BedWars 式多房间匹配：大厅 → 匹配 → 房间等待区 → 倒计时开局（玻璃笼）→ 结算回大厅
 room:

@@ -2,7 +2,7 @@
 
 超时空辉夜姬「竹取合战」的 Minecraft 服务端复刻插件。
 
-**9 名角色 · 20 把武器 · 20 种技能**，用原版事件接管按键做出技能战斗层，再叠上 **3v3 积分赛** 与 **PVE 月人入侵**两种玩法，含完整的大厅、**动态房间匹配（月之都制）**、观战与跨局战绩流程。武器之间能打出「挂标记 → 兑现」式的组合技。
+**9 名角色 · 20 把武器 · 20 种技能**，用原版事件接管按键做出技能战斗层，再叠上 **3v3 积分赛**、**PVE 月人入侵**与 **战国 3v3（三局两胜）**三种玩法，含完整的大厅、**动态房间匹配（月之都制）**、观战与跨局战绩流程。武器之间能打出「挂标记 → 兑现」式的组合技。
 
 | 项 | 说明 |
 | --- | --- |
@@ -38,6 +38,15 @@
 - **3v3 积分赛**：600 分目标、20 分钟时限；击杀月人 `+3`、击杀玩家 `+10`、拆除基地 `+50`；基地占点读条 10 秒、开局 60 秒保护期。
 - **基地粒子标记**：对局中双方基地用**队伍颜色**粒子持续标出（每秒刷新）——顶面描一圈方框 + 中心 4 格立柱，远处看柱、近处看框；基地被拆掉后标记立即消失，「标记不见」本身就是拆除反馈。受 `feedback.particles` 总开关控制。
 - **PVE 月人入侵**：所有人同一队打月人，含**保卫据点**、**五大波次精英潮**、**三档难度**与**精英随人数变强**（详见第四节）。
+- **战国 3v3（三局两胜）**：独立模式，每小局先攻陷敌方天守阁者胜、先赢两小局者赢整场。
+  - **天守阁**永久不可直接破坏（纯方块结构，拦截破坏与爆炸，不改地形），唯一胜利通道是击破器；
+  - **箭楼**（上下路各一）：清掉牛鬼（尸壳）与虾兵蟹将（卫道士）→ 敲钟 → 站进占领区读条；
+    **双方同时读条时互锁**（两张进度都停滞），可反复易手，每次易手后守卫重刷；
+  - **大将击破器**：占领箭楼后在**敌方**门前生成；拾取携带 → 进敌方天守阁范围自动读条 → 读满本局获胜。
+    不可破坏 / 不可丢弃 / 不可被敌方捡走 / 不可入箱，被消耗后再占领会自动补齐；
+  - **跳跃台**：占领箭楼后在**己方**门前激活，站上去直达最近的己方已占领箭楼，**阵亡复活后也能用**；
+  - **中地小兵**：场地中央持续生成、**允许被绕过**；击杀攒能量，能量满按 **Q** 释放必杀技。
+  - 配置见第六节的五份 `sengoku*.yml`；划区与运维用 `/taketori sengoku`。
 - **动态房间制（月之都）**：房间由玩家按需创建——大厅「降临月之都」或 `/taketori room create` 异步复制模板世界（`moonmaps/`）为专属世界，结算完成后自动删除回收；「快速加入」三级回退（等待房 → 缺人对局补位 → 自动建房），**房间列表 GUI** 创建/加入/旁观/删除；进房即封存自带状态（背包/血量/药水/游戏模式），倒计时 90 秒（过半场 30 秒、满员 5 秒）；对局掉线有补位与判负缓冲。
 - **实时房间状态牌**：`/taketori lobby addstatus <模板id>` 绑定告示牌，每秒刷新该模板当前房间的状态与人数，点击直接加入 / 旁观 / 创建（无房时）。
 - **告示牌指向界面**：点击告示牌打开对应 GUI（玩家菜单 / 角色菜单 / 排行榜），具体操作由界面按钮完成；`join` / `leave` 直接执行匹配动作（快速加入 / 退房回大厅）。
@@ -387,6 +396,46 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 
 ### 管理员指令（`taketori.admin`）
 
+**战国 3v3**（独立模式；先 `arena setup` 选中场地，区域类用 `pos1`/`pos2` 选区，点类站在位置上）
+
+```
+/taketori sengoku setkeep <red|blue>       天守阁区域（不可被直接破坏，只能被击破器攻陷）
+/taketori sengoku setkeepdoor <red|blue>   天守阁门前点：击破器与跳跃台的生成位置
+/taketori sengoku settower <序号>          箭楼占领区（上下路各一）
+/taketori sengoku setbell <序号>           箭楼铜钟位置（右键它触发占领读条）
+/taketori sengoku setguard <序号>          箭楼守卫刷新点（牛鬼与虾兵蟹将）
+/taketori sengoku setmid [序号]            中地小兵刷新区
+/taketori sengoku setjumppad <red|blue>    跳跃台位置
+/taketori sengoku check                    检查本场地的战国点位是否齐全
+/taketori sengoku delkeep <red|blue>       清除天守阁区域
+/taketori sengoku delkeepdoor <red|blue>   清除天守阁门前点
+/taketori sengoku deltower <序号>          清除整座箭楼（占领区 + 铜钟 + 守卫点）
+/taketori sengoku delbell <序号>           只清铜钟
+/taketori sengoku delguard <序号>          只清守卫刷新点
+/taketori sengoku delmid <序号>            清除中地小兵刷新区
+/taketori sengoku deljumppad <red|blue>    清除跳跃台
+/taketori sengoku delall confirm           清空本场地的全部战国点位
+/taketori sengoku start                    强制开局
+/taketori sengoku pause | resume           暂停 / 继续小局计时（暂停不吃局内时间）
+/taketori sengoku endround [red|blue]      强制结束本小局（不指定则判平局重开）
+/taketori sengoku towers                   查看箭楼归属、守卫数、双方读条进度
+/taketori sengoku breaker [red|blue]       查看击破器位置与自己当前的读条进度
+/taketori sengoku jumppad [red|blue]       查看跳跃台状态与位置
+/taketori sengoku score                    查看比分、剩余时间、各人能量
+/taketori sengoku mode [pvp|pve|sengoku_3v3]  查看 / 切换全局默认模式（写回 config.yml）
+/taketori sengoku menu                     打开图形化面板（上面这些的按钮版）
+```
+
+**切模式**有两种粒度：
+
+```
+/taketori sengoku mode sengoku_3v3     全局默认（写回 config.yml，只影响之后新建的房间）
+/taketori match mode sengoku_3v3 [房间id]  只切一个房间（等待中才能切，不影响别人）
+```
+
+**图形化面板**：`/taketori admin` → 「战国 3v3」，或直接 `/taketori sengoku menu`。
+划区按钮作用在当前选区 / 你站的位置上，面板顶部会显示选区状态与当前模式。
+
 **场地**（多场地：`set*` / `del*` 作用于当前选中的场地，先用 `create` / `select` 选中）
 
 ```
@@ -494,6 +543,11 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 
 - `weapons.yml`：全部武器数值与技能参数。`attack-damage` / `attack-speed` 写的是**最终值**；`modes.<MODE>.skills` 会整段替换武器级同名槽位；写错的参数键会在启动时被配置校验点名。**当前模板版本 `config-version: 10`**（2.0 的武器与技能体系）。
 - `characters.yml`：角色血量、移速、武器列表与描述。
+- **战国 3v3 的五份配置**（同样不会被插件覆盖，改完 `/taketori reload` 即生效）：
+  `sengoku.yml`（赛制 / 局时长 / 超时判定 / 天守阁）、`sengoku-towers.yml`（箭楼与守卫）、
+  `sengoku-siege.yml`（击破器与跳跃台）、`sengoku-minions.yml`（中地小兵）、
+  `sengoku-energy.yml`（能量与必杀）。点位写在 `arenas.yml` 的 `arenas.<id>.sengoku` 段，
+  由 `/taketori sengoku setkeep …` 等命令写入。
 - `messages.yml`：所有提示文案（新键会自动回填默认值）。
 - 战斗数值全部在这两个文件里，**没有硬编码**：改完 `/taketori reload` 即生效。
   （唯一例外是场地技能的参数在**施法瞬间快照**，热重载从下一次施法开始生效。）
