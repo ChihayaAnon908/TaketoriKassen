@@ -2,7 +2,7 @@
 
 超时空辉夜姬「竹取合战」的 Minecraft 服务端复刻插件。
 
-**9 名角色 · 20 把武器 · 20 种技能**，用原版事件接管按键做出技能战斗层，再叠上 **3v3 积分赛**、**PVE 月人入侵**与 **战国 3v3（三局两胜）**三种玩法，含完整的大厅、**动态房间匹配（月之都制）**、观战与跨局战绩流程。武器之间能打出「挂标记 → 兑现」式的组合技。
+**9 名角色 · 20 把武器 · 20 种技能**，用原版事件接管按键做出技能战斗层，再叠上 **3v3 积分赛**、**PVE 月人入侵**与**战国 3v3（三局两胜）**三种玩法，含完整的大厅、**动态房间匹配（月之都制）**、观战与跨局战绩流程。武器之间能打出「挂标记 → 兑现」式的组合技。
 
 | 项 | 说明 |
 | --- | --- |
@@ -12,77 +12,23 @@
 | 额外依赖 | 无 |
 | 许可 | MIT |
 
----
-
-## 一、功能
-
-### 战斗层
-
-- **20 把武器 / 9 名角色 / 20 种技能类型**，全部数值外置在 `weapons.yml`、`characters.yml`，游戏内也能改（`/taketori editor`）。
-- **四个按键槽**：左键 / 右键 / 第三槽 / Q，逐槽独立冷却；屏幕上方 BossBar 冷却进度条。
-- **第三槽触发键可配**：默认双击潜行键，也可换成潜行 + Q、双击右键、F 键、潜行 + 右键，支持多选。
-- **模式切换**：Q 在武器模式间循环（锤击 ⇄ 火箭、近战 ⇄ 远程、镜面 ⇄ 爆发…），真源在玩家档案。
-- **载体护栏**：手持插件武器时不挖方块、不铲路、不去皮、不放置、不抛钩、不投掷、不丢弃、不换副手、不驯服实体。
-- **身份与防伪**：PDC 记录角色 / 武器 / 模式 / 实例 / 归属；绑定武器不能放进箱子，也不会被他人捡走。
-- **版本适配**：属性 / 粒子 / 音效 / 药水效果的名字统一走 `VersionAdapter` 的注册表解析，改名不生效只告警不崩服。
-- **打击反馈**：动作栏伤害数字汇总（近战 / 弹体 / 强化箭 / 范围技能）、冷却就绪提示音、连击层数可视化、重技能 title 演出；弹道支持软吸附（`homing-strength`，默认关闭）；近战蓄力门控（`combat.melee-charge-gate`）奖励攻击节奏；技能释放自动挥手。
-- **四种状态机制**（2.0，让武器之间能打出组合技）：
-  - **易伤标记**：被标记者受到的所有伤害提高（`mark-bonus`），是「先挂标再爆发」的公共前置；
-  - **破甲**：与易伤**独立乘区**、可同时存在，结算为 `×(1+标记) ×(1+破甲)`，破甲硬上限 30%；
-  - **兑现**：带 `echo-bonus` 的技能或弹体，打在**带标记 / 破甲 / 减速 / 冻结**的目标身上时放大伤害，命中会在动作栏报「兑现！」；
-  - **场地与召唤**：领域类技能（治疗场 / 丝网陷阱）周期结算；召唤物带归属标记，队友与召唤者打不到它、击杀不计分。
-- **组合技**：9 个角色各有 1 组连携（如辉夜「月铃挂易伤 → 火箭锤兑现」、八千代「旗鱼冻结 → 月镜爆发」），共 8 组，全部由上面四种机制自然涌现，不需要额外配置。
-
-### 玩法层
-
-- **3v3 积分赛**：600 分目标、20 分钟时限；击杀月人 `+3`、击杀玩家 `+10`、拆除基地 `+50`；基地占点读条 10 秒、开局 60 秒保护期。
-- **基地粒子标记**：对局中双方基地用**队伍颜色**粒子持续标出（每秒刷新）——顶面描一圈方框 + 中心 4 格立柱，远处看柱、近处看框；基地被拆掉后标记立即消失，「标记不见」本身就是拆除反馈。受 `feedback.particles` 总开关控制。
-- **PVE 月人入侵**：所有人同一队打月人，含**保卫据点**、**五大波次精英潮**、**三档难度**与**精英随人数变强**（详见第四节）。
-- **战国 3v3（三局两胜）**：独立模式，每小局先攻陷敌方天守阁者胜、先赢两小局者赢整场。
-  - **天守阁**永久不可直接破坏（纯方块结构，拦截破坏与爆炸，不改地形），唯一胜利通道是击破器；
-  - **箭楼**（上下路各一）：清掉牛鬼（尸壳）与虾兵蟹将（卫道士）→ 敲钟 → 站进占领区读条；
-    **双方同时读条时互锁**（两张进度都停滞），可反复易手，每次易手后守卫重刷；
-  - **大将击破器**：占领箭楼后在**敌方**门前生成；拾取携带 → 进敌方天守阁范围自动读条 → 读满本局获胜。
-    不可破坏 / 不可丢弃 / 不可被敌方捡走 / 不可入箱，被消耗后再占领会自动补齐；
-  - **跳跃台**：占领箭楼后在**己方**门前激活，站上去直达最近的己方已占领箭楼，**阵亡复活后也能用**；
-  - **中地小兵**：场地中央持续生成、**允许被绕过**；击杀攒能量，能量满按 **Q** 释放必杀技。
-  - 配置见第六节的五份 `sengoku*.yml`；划区与运维用 `/taketori sengoku`。
-- **动态房间制（月之都）**：房间由玩家按需创建——大厅「降临月之都」或 `/taketori room create` 异步复制模板世界（`moonmaps/`）为专属世界，结算完成后自动删除回收；「快速加入」三级回退（等待房 → 缺人对局补位 → 自动建房），**房间列表 GUI** 创建/加入/旁观/删除；进房即封存自带状态（背包/血量/药水/游戏模式），倒计时 90 秒（过半场 30 秒、满员 5 秒）；对局掉线有补位与判负缓冲。
-- **实时房间状态牌**：`/taketori lobby addstatus <模板id>` 绑定告示牌，每秒刷新该模板当前房间的状态与人数，点击直接加入 / 旁观 / 创建（无房时）。
-- **告示牌指向界面**：点击告示牌打开对应 GUI（玩家菜单 / 角色菜单 / 排行榜），具体操作由界面按钮完成；`join` / `leave` 直接执行匹配动作（快速加入 / 退房回大厅）。
-- **菜单时钟**：发给玩家的一个道具，右键打开玩家菜单（默认进服发放、丢不掉）。
-- **观众模式**：聊天栏给出可点击的「退出观战」按钮并定期重发；阵亡自动进入旁观（屏幕上方 **BossBar 显示复活倒计时**），倒计时结束回己方出生点复活。
-- **跨局战绩**：总积分 / 对局数 / 胜场 / 击杀 / 月人击杀 / 拆家 / 死亡 / 单局最高写入 `data/stats.yml`，`/taketori ranks` 图形查看。
-
-### 管理工具
-
-- **选区锄**：默认绑定下界合金锄，左键 / 右键点方块划区域，手持时粒子描出边框，区域重叠会当场提示。
-- **道具点工具**：第二种选区工具（默认结构空位），划道具刷新点用。
-- **删除已划区域**：`/taketori admin` 里点条目即删（基地 / 月人刷新区 / 道具点 / 据点），命令行形式见第五节。
-- **武器数据编辑 GUI**：`/taketori editor` 三层菜单（武器 → 技能槽 → 参数），改完写回 `weapons.yml` 并保留注释。
-- **管理员菜单**：`/taketori admin` 把对局控制、场地、大厅、维护指令做成按钮。
-- **角色分配**：同一队伍不允许出现相同角色；同队抢角色时按玩家的**隐性标签权重**裁决。
-- **自检**：`/taketori doctor` 一次报告识别链路、名字解析、配置校验与多世界范围；`/taketori keys` 回放最近的原始按键事件。
-
-### 多世界兼容
-
-给 Multiverse 之类的多世界服务器用，两项都默认收窄、可一键恢复旧行为：
-
-- **进服送大厅只接管白名单世界**（默认仅大厅出生点所在的世界，其它世界位置不变）；
-- **消息播报只发给消息所属世界**（对局播报 → 对局世界，大厅播报 → 大厅世界）。
-
-完整配置说明（模板世界 / 房间世界 / Multiverse 共存 / 排查表）见 **[docs/多世界配置.md](docs/多世界配置.md)**。
+| 你是…… | 从这里开始 |
+| --- | --- |
+| **服主 / 玩家** | [安装](#一安装) → [十步设置](#二十步设置) → [玩法说明](#三玩法说明) → [指令参考](#四指令参考) → [配置项](#五配置项) |
+| **开发者** | [架构总览](#六架构总览) → [构建与测试](#七构建与测试) → [目录结构](#八目录结构) |
 
 ---
 
-## 二、安装
+# 给服主与玩家
 
-1. 把 `TaketoriKassen-1.2.1.jar` 放进服务端 `plugins/` 目录，重启服务器。
-2. 首次启动会在 `plugins/TaketoriKassen/` 生成 `config.yml`、`weapons.yml`、`characters.yml`、`messages.yml` 与模板目录 `moonmaps/`。
+## 一、安装
+
+1. 把 `TaketoriKassen-1.5.0.jar` 放进服务端 `plugins/` 目录，重启服务器。
+2. 首次启动会在 `plugins/TaketoriKassen/` 生成 `config.yml`、`weapons.yml`、`characters.yml`、`messages.yml`、五份 `sengoku*.yml` 与模板目录 `moonmaps/`。
 3. 控制台出现下面这行即加载成功：
 
 ```
-TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类型（适配层 default）
+TaketoriKassen v1.5.0 已启用：20 把武器 / 9 个角色 / 20 种技能类型（适配层 default）
 ```
 
 | 权限 | 默认 | 用途 |
@@ -90,11 +36,11 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 | `taketori.play` | 所有人 | 玩家指令：菜单、选角色、加入队列、观战、技能查询 |
 | `taketori.admin` | OP | 管理指令：场地、大厅、分队、开局、发武器、编辑器、重载、调试 |
 
-> 插件的 `api-version` 声明为 `1.21.4`，服务端低于该版本会拒绝加载。
+> 插件的 `api-version` 声明为 `1.21`，服务端低于该版本会拒绝加载。
 
----
+装好之后的三种玩法，玩家只需要记住：大厅点告示牌**加入**或**降临月之都**建房，等倒计时归零就能开打。
 
-## 三、游戏内设置流程
+## 二、十步设置
 
 从装好插件到能开一局，按顺序做完这十步即可（除第 1 步准备模板外，全部在游戏内执行）。
 第 2~6 步由**划场地会话**（`/taketori arena setup`）串起来：一次进入编辑世界，之后每划完一项
@@ -183,7 +129,7 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 
 先校验必设项（没齐会把「还缺什么」再列一遍，会话保留可继续补），再写回模板世界
 （失败自动回滚）；**写回真正落盘之后**才对齐模板文件夹名、保存 `arenas.yml` 并回报
-「已完成」——所以看到「已完成」就代表磁盘上已是新图，不会出现「报了成功却没写回」。
+「已完成」——所以看到「已完成」就代表磁盘上已是新图。
 
 中途放弃用 `/taketori arena setup cancel`——它会清掉会话，编辑世界仍加载着。
 放弃路径**不会**自动对齐模板名：
@@ -257,7 +203,7 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 /taketori match status             # 逐房间查看阶段 / 人数 / 比分 / 剩余时间
 ```
 
-### 11. PVE（可选）
+### 11. PVE 与战国（可选）
 
 ```
 /taketori arena setoutpost          # 划 PVE 保卫据点（选区中心，或你站的位置）
@@ -265,18 +211,19 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 /taketori pve difficulty hard       # 切难度（easy / normal / hard）
 ```
 
----
+战国 3v3 的点位划分（天守阁 / 箭楼 / 铜钟 / 守卫 / 中地 / 跳跃台）用 `/taketori sengoku`，
+详见[玩法说明](#34-战国-3v3三局两胜)与[指令参考](#四指令参考)。
 
-## 四、玩法
+## 三、玩法说明
 
-### 4.1 按键
+### 3.1 按键
 
 | 按键 | 作用 |
 | --- | --- |
 | 左键 | 第一槽技能（近战 / 射击类主输出），受武器攻击冷却限制，连点无效 |
 | 右键 | 第二槽技能（核心技能，冷却 1~20 秒） |
 | **第三槽键** | 位移 / 控制类技能；默认**双击潜行键**，成功触发时附带 2 秒跳跃提升 V |
-| Q | 切换该武器自己的模式（彩叶为切换装备） |
+| Q | 切换该武器自己的模式（彩叶为切换装备）；战国模式能量满时释放必杀技 |
 | 1 / 2 | 切换快捷栏武器（有两件武器的角色） |
 | F | 交换副手（已被插件接管，不会真的换副手） |
 
@@ -293,7 +240,7 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 按了没反应时：先用 `/taketori keys` 看按键有没有传到服务端，再用 `/taketori f` 手动触发同一个技能。
 近战左键受蓄力门控（`combat.melee-charge-gate`，默认 0.9）：蓄力不足只结算原版轻击，满蓄才触发技能。
 
-### 4.2 角色与武器
+### 3.2 角色与武器
 
 | 角色 | id | 血量 | 移速 | 武器 |
 | --- | --- | --- | --- | --- |
@@ -311,7 +258,7 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
   **不可破坏**标记（`loadout` 段可配）。大厅与等待区不会拿到对局装备；对局进行中改角色（含管理员
   `/taketori character`）会立即换装。你原来的护甲连整背包在进房时被封存，结算原样返还。
 - 乃依的弓**没有箭也能射**：背包里没有箭时右键即发，走与普通射击相同的强化 / 减益 / 三连射规则。
-- 同一个队伍里不允许出现相同角色；不同队伍之间可以有相同角色。
+- 同一个队伍里不允许出现相同角色；不同队之间可以有相同角色。
 - 一局结束后参赛者的角色会被**清空**（含掉线者），下一局重新选择；隐性标签不受影响。
 - 每把武器的四个槽位分别绑了什么，用 `/taketori skills` 看手里的武器即可。
 
@@ -329,46 +276,78 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 | 真实 | `masami_gun`、`masami_lens` |
 | 芦花 | `ashika_reed`、`ashika_thread` |
 
-三把武器的角色也用快捷栏 1 / 2 / 3 切换（`input.weapon-slots` 默认已是 `[0,1,2,3]`，无需改配置）。
+**战斗层的公共机制**（三种玩法通用）：
 
-### 4.3 3v3 积分赛
+- **四种状态机制**：**易伤标记**（被标者受到的所有伤害提高）、**破甲**（独立乘区、硬上限 30%）、
+  **兑现**（带 `echo-bonus` 的技能打在带状态的目标上放大伤害，动作栏报「兑现！」）、
+  **场地与召唤**（领域类周期结算；召唤物带归属，队友打不到、击杀不计分）；
+- **组合技**：9 个角色各有 1 组连携（如辉夜「月铃挂易伤 → 火箭锤兑现」），全部由四种机制自然涌现，不需要额外配置；
+- **打击反馈**：动作栏伤害数字汇总、冷却就绪提示音、连击可视化、重技能 title 演出；
+- **载体护栏**：手持插件武器时不挖方块、不放置、不丢弃、不换副手；绑定武器不能入箱、不会被他人捡走。
+
+### 3.3 三种对局模式
+
+| 模式 | 切换 | 节奏 |
+| --- | --- | --- |
+| **3v3 积分赛（PVP）** | 默认 | 先到 600 分或 20 分钟到时比分高者胜 |
+| **PVE 月人入侵** | `/taketori match mode pve [房间id]` | 全员同一队守据点，撑过五大波次 |
+| **战国 3v3（三局两胜）** | `/taketori match mode sengoku_3v3 [房间id]` | 每小局攻陷敌方天守阁者胜，先赢两小局赢整场 |
+
+**3v3 积分赛**
 
 | 项目 | 设定 |
 | --- | --- |
-| 获胜 | 先到 600 分；或 20 分钟到时比分高者胜（平分平局） |
 | 击杀月人 / 玩家 / 拆基地 | `+3` / `+10` / `+50` |
 | 击杀回血 | 击杀敌方玩家回复 3 颗心（`combat.kill-heal`，满血不回） |
 | 基地 | 双方各 3 个（数量可配），开局 60 秒保护期内不能占点 |
 | 占点 | 站进对方基地区域持续 10 秒；区域内没敌人时进度按 `base.decay-per-second` 衰减 |
-| 月人 | 每 9 秒一批（铁甲僵尸 / 铁甲骷髅按权重随机），场上最多 15 个；多个刷新区之间**按区轮转均等分布** |
-| 精英月人 | 每 5 波出一批（钻甲 + 药水 buff + 可配攻击力），只在 mixed 标签刷新区出现 |
+| 月人 | 每 9 秒一批（铁甲僵尸 / 骷髅按权重随机），场上最多 15 个；多刷新区之间**按区轮转均等分布** |
+| 精英月人 | 每 5 波一批（钻甲 + 药水 buff），只在 mixed 标签刷新区出现 |
 | 复活 | 死亡 5 秒后回己方出生点，死亡不掉落物品 |
-| 出生增益 | 开局与复活后 10 秒药水增益（`combat.spawn-buff`） |
-| 记分板 | 双方比分 / 你的得分 / 本局击杀 / 波次 / 剩余分钟 |
+| 基地标记 | 双方基地用**队伍颜色**粒子持续标出（远处看柱、近处看框），被拆后标记立即消失 |
 
-### 4.4 PVE 月人入侵
+**PVE 月人入侵**：所有人同一队、不占点、玩家之间默认无伤害。
 
-`/taketori match mode pve` 切换后：所有人同一队、不占点、玩家之间默认无伤害。
+- **保卫据点**：开局放出无敌雪傀儡，月人靠近就按「在场月人数 × 每秒伤害」扣耐久，归零对局结束（可配成只播报）；
+- **五大波次**：每约 60 秒一波精英潮，默认 5 波、每波 8 名精英；
+- **三档难度**（`/taketori pve difficulty <easy|normal|hard>`）：hard 档据点耐久 460 / 每月人每秒 11 伤 / 每波 10 精英；normal 默认；
+- **精英随人数变强**：每多 1 名参战玩家，精英药水等级整体 +1，叠加难度档后封顶 6 级。
 
-**保卫据点**：开局在据点点位放出一个取消移动 AI 的雪傀儡，本体无敌（玩家打不掉），耐久由插件结算。月人进入半径（默认 6 格）内就按 **在场月人数 × 每秒伤害**扣血；耐久归零播报「已被月人拆毁」并直接结束对局（可配成只播报）。位置用 `/taketori arena setoutpost` 划定，没划定则回落到第一个月人刷新区中心。
+**战国 3v3（三局两胜）**：独立模式，与 PVP / PVE 互不影响。
 
-**五大波次**：除常规刷怪外，每约 60 秒来一波精英潮，默认 5 波、每波 8 名精英；每波开始会先清掉上一波残留的精英。
+- **赛制**：每小局先攻陷敌方天守阁者胜，先赢两小局者赢整场（赛制与局时长可配）；
+  超时按箭楼占领数判定，持平则本小局重开——「龟缩到时间结束」不是有效战术；
+- **天守阁**：永久不可直接破坏（拦截破坏与爆炸），唯一胜利通道是击破器；
+- **箭楼**（上下路各一）：清掉牛鬼（尸壳）与虾兵蟹将（卫道士）→ 敲钟 → 站进占领区读条；
+  **双方同时读条时互锁**（两张进度都停滞），可反复易手，每次易手后守卫重刷；
+- **大将击破器**：占领箭楼后在**敌方**门前生成；拾取携带 → 进敌方天守阁范围自动读条 →
+  读满本局获胜。不可破坏 / 不可丢弃 / 不可被敌方捡走 / 不可入箱，被消耗后再占领会自动补齐；
+- **跳跃台**：占领箭楼后在**己方**门前激活，站上去直达最近的己方已占领箭楼，**阵亡复活后也能用**；
+- **中地小兵**：场地中央持续生成、**允许被绕过**；击杀攒能量，能量满按 **Q** 释放必杀技。
 
-**三档难度**（`/taketori pve difficulty <easy|normal|hard>`）：
+场地点位用 `/taketori sengoku setkeep / settower / setbell …` 划定，`/taketori sengoku check`
+检查是否齐全；配置见[配置项](#五配置项)的五份 `sengoku*.yml`。
 
-| 档位 | 据点耐久 | 每月人每秒 | 每波精英 | 精英额外 buff |
-| --- | --- | --- | --- | --- |
-| easy | 240 | 4.0 | 6 | +0 级 |
-| normal（默认） | 320 | 7.0 | 8 | +1 级 |
-| hard | 460 | 11.0 | 10 | +2 级 |
+### 3.4 房间与匹配（月之都制）
 
-**精英随人数变强**：每多 1 名参战玩家，精英的药水等级整体 +1 级，叠加难度档加成后封顶 6 级（例：3 人打 normal，精英 buff 比配置值高 3 级）。
+- **动态房间**：房间由玩家按需创建，异步复制模板世界为专属世界，结算后自动删除回收；
+  服务器最多同时 `room.max-rooms`（默认 8）个房间，每人限建 1 个；
+- **等待与倒计时**：进房即封存自带状态（背包 / 血量 / 药水 / 游戏模式），等待区倒计时三档；
+- **观战**：聊天栏给出可点击的「退出观战」按钮并定期重发；阵亡自动旁观，
+  屏幕上方 BossBar 显示复活倒计时，结束回己方出生点复活；
+- **跨局战绩**：总积分 / 胜场 / 击杀 / 拆家等写入 `data/stats.yml`，`/taketori ranks` 图形查看；
+- **菜单时钟**：进服发放的道具，右键打开玩家菜单（匹配 / 队伍 / 角色 / 排行榜），丢不掉。
 
-记分板显示总分、目标分、据点耐久百分比与大波次进度；`/taketori pve` 查看当前设置。
+### 3.5 多世界兼容
 
----
+给 Multiverse 之类的多世界服务器用，两项都默认收窄、可一键恢复旧行为：
 
-## 五、指令用法
+- **进服送大厅只接管白名单世界**（默认仅大厅出生点所在的世界，其它世界位置不变）；
+- **消息播报只发给消息所属世界**（对局播报 → 对局世界，大厅播报 → 大厅世界）。
+
+完整配置说明（模板世界 / 房间世界 / Multiverse 共存 / 排查表）见 **[docs/多世界配置.md](docs/多世界配置.md)**。
+
+## 四、指令参考
 
 所有指令统一使用全名 `/taketori`，没有缩写别名。
 
@@ -384,8 +363,6 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 /taketori mode                     手动触发 Q 槽技能（Q 被别的插件吞掉时用）
 /taketori f                        手动触发第三槽技能
 /taketori keys                     按键诊断：回放最近收到的原始输入事件
-/taketori tag <玩家> <标签|none>   查看 / 设置隐性标签（管理员）
-/taketori tags                     隐性标签 GUI（管理员）
 /taketori lobby join|leave|spectate 快速加入房间 / 退房回大厅 / 旁观
 /taketori leave                    退出观战、离开等待房间（对局中参赛者不能中途退出）
 /taketori room create [模板id]     创建房间（降临月之都，异步复制模板世界）
@@ -434,7 +411,6 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 ```
 
 **图形化面板**：`/taketori admin` → 「战国 3v3」，或直接 `/taketori sengoku menu`。
-划区按钮作用在当前选区 / 你站的位置上，面板顶部会显示选区状态与当前模式。
 
 **场地**（多场地：`set*` / `del*` 作用于当前选中的场地，先用 `create` / `select` 选中）
 
@@ -448,7 +424,7 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 /taketori arena delete <id>                      删除场地（房间运行中会被拦截）
 /taketori arena wand                             领选区锄（左键 = 角点 1，右键 = 角点 2，潜行+左键 = 清空）
 /taketori arena pos1 | pos2                      用当前位置设置选区角点
-/taketori arena setminion [编号] [normal|mixed]  选区设为月人刷新区（normal 只刷普通，mixed 普通+精英；按区轮转均分）
+/taketori arena setminion [编号] [normal|mixed]  选区设为月人刷新区（normal 只刷普通，mixed 普通+精英）
 /taketori arena setbase <red|blue> [编号]        选区设为某队基地（编号可省略）
 /taketori arena setspawn <red|blue>              当前位置设为某队出生点
 /taketori arena setwait                          当前位置设为中立等待出生点（未设置不能开局）
@@ -483,15 +459,14 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 /taketori lobby list                             查看大厅配置与告示牌
 ```
 
-**对局**（多房间：不写场地 id 时取「你所在房间 → default → 第一个房间」）
+**对局**（多房间：不写房间 id 时取「你所在房间 → default → 第一个房间」）
 
 ```
-/taketori match start [场地id]                   对指定房间开局（双方各至少 1 人）
-/taketori match force [场地id]                   人数不够也开（只按该房等待区的人分队）
-/taketori match stop [场地id] [原因]             结束指定房间（不影响其他并发房间）；等待/倒计时阶段则直接解散房间，房内玩家回大厅
+/taketori match start [房间id]                   对指定房间开局（双方各至少 1 人）
+/taketori match force [房间id]                   人数不够也开（只按该房等待区的人分队）
+/taketori match stop [房间id] [原因]             结束指定房间（不影响其他并发房间）；等待/倒计时阶段则直接解散房间，房内玩家回大厅
 /taketori match status                           逐房间列出阶段 / 比分 / 剩余 / 基地 / 场上月人
-/taketori match mode <pvp|pve> [场地id]          切换指定房间模式（仅等待中可切，不写全局配置）
-/taketori match difficulty <easy|normal|hard>    同下面的 pve difficulty
+/taketori match mode <pvp|pve|sengoku_3v3> [房间id]  切换指定房间模式（仅等待中可切，不写全局配置）
 /taketori pve                                    查看 PVE 设置（难度 / 波次 / 据点耐久）
 /taketori pve difficulty <easy|normal|hard>      切换 PVE 难度（下一局生效）
 /taketori team <玩家> <red|blue|none>            手动分队（作用于目标玩家所在房间）
@@ -509,9 +484,11 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 /taketori admin                                  管理员菜单（含删除区域等按钮）
 ```
 
----
+**管理工具一览**：选区锄（默认下界合金锄，粒子描边、重叠提示）、道具点工具（默认结构空位）、
+武器数据编辑 GUI（三层菜单、写回保留注释）、管理员菜单、角色分配（同队不重复，隐性标签权重裁决）、
+`/taketori doctor` 自检与 `/taketori keys` 按键回放。
 
-## 六、配置项
+## 五、配置项
 
 改完 `config.yml` 执行 `/taketori reload` 生效（模板世界文件夹在 `moonmaps/<模板名>/`，与场地定义 `arenas.yml`、大厅 `lobby.yml` 一样不受 reload 影响）。
 
@@ -523,7 +500,7 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 | `scoring` | `minion-kill` / `player-kill` / `base-capture` | 3 / 10 / 50 |
 | `combat` | `kill-heal` / `minion-kill-heal` / `friendly-fire-protection` / `third-slot-buff` | 6.0 / 0.0 / auto / 2 秒跳跃提升 V |
 | `loadout` | `armor-enabled` / `armor-material` / `armor-protection` | true / IRON / 2（保护 II） |
-| `minion` | `health` / `iron-armor` / `interval-seconds` / `per-spawn` / `max-alive` / `types` / `elite` | 40 / true / 9 / 3 / 15 / 僵尸骷髅权重 / 每 5 波（刷新节奏三项可在 arenas.yml 的 `minion-spawn` 按场地覆盖） |
+| `minion` | `health` / `iron-armor` / `interval-seconds` / `per-spawn` / `max-alive` / `types` / `elite` | 40 / true / 9 / 3 / 15 / 僵尸骷髅权重 / 每 5 波 |
 | `pve` | `difficulty` / `big-waves` / `elite-scaling` / `outpost` | normal / 5 波·8 精英·60 秒 / 每多 1 人 +1 级 / 三档数值 |
 | `base` | `count-per-team` / `capture-seconds` / `capture-delay-seconds` / `decay-per-second` / `multi-player-bonus` | 3（或 auto）/ 10 / 60 / 0.5 / true |
 | `lobby` | `teleport-on-join` / `takeover-worlds` / `protect` / `return-after-match` | true / `[]`（仅大厅世界）/ true / true |
@@ -536,28 +513,60 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 | `loot` | `enabled` / `interval-seconds` / `max-drops` / `items` | true / 30 / 6 / 道具池 |
 | `tags` | `default` / `vip` / `staff` 的权重 | 0 / 10 / 100 |
 
-> 多房间化之后，开局时机由 `waiting.min-players` / 房间倒计时决定；`lobby.auto-start-players`
-> 是旧队列流程的遗留键，已不再参与任何逻辑（保留只为兼容旧配置文件）。
-
 ### 数值文件（插件不会覆盖）
 
-- `weapons.yml`：全部武器数值与技能参数。`attack-damage` / `attack-speed` 写的是**最终值**；`modes.<MODE>.skills` 会整段替换武器级同名槽位；写错的参数键会在启动时被配置校验点名。**当前模板版本 `config-version: 10`**（2.0 的武器与技能体系）。
+- `weapons.yml`：全部武器数值与技能参数。`attack-damage` / `attack-speed` 写的是**最终值**；`modes.<MODE>.skills` 会整段替换武器级同名槽位；写错的参数键会在启动时被配置校验点名。**当前模板版本 `config-version: 10`**（2.0 的武器与技能体系）。插件升级后如果控制台提示「你的 weapons.yml 是模板 v…」，同步方式是备份并删除该文件后 `/taketori reload` 重新生成。
 - `characters.yml`：角色血量、移速、武器列表与描述。
-- **战国 3v3 的五份配置**（同样不会被插件覆盖，改完 `/taketori reload` 即生效）：
+- **战国 3v3 的五份配置**（改完 `/taketori reload` 即生效）：
   `sengoku.yml`（赛制 / 局时长 / 超时判定 / 天守阁）、`sengoku-towers.yml`（箭楼与守卫）、
   `sengoku-siege.yml`（击破器与跳跃台）、`sengoku-minions.yml`（中地小兵）、
   `sengoku-energy.yml`（能量与必杀）。点位写在 `arenas.yml` 的 `arenas.<id>.sengoku` 段，
   由 `/taketori sengoku setkeep …` 等命令写入。
 - `messages.yml`：所有提示文案（新键会自动回填默认值）。
-- 战斗数值全部在这两个文件里，**没有硬编码**：改完 `/taketori reload` 即生效。
-  （唯一例外是场地技能的参数在**施法瞬间快照**，热重载从下一次施法开始生效。）
-- 插件升级后如果控制台提示「你的 weapons.yml 是模板 v…」，说明内置模板更新了；同步方式是备份并删除该文件后 `/taketori reload` 重新生成。
+- 战斗数值全部外置、**没有硬编码**。（唯一例外是场地技能的参数在**施法瞬间快照**，热重载从下一次施法开始生效。）
 
-武器与技能的完整设计（每个角色每把武器每个槽位的数值、8 组组合技、伤害基线）见 **[docs/武器技能设计-2.0.md](docs/武器技能设计-2.0.md)**。
+武器与技能的完整设计见 **[docs/武器技能设计-2.0.md](docs/武器技能设计-2.0.md)**；
+多世界配置见 **[docs/多世界配置.md](docs/多世界配置.md)**；
+战国 3v3 的实现方案见 **[docs/战国3v3实现方案.md](docs/战国3v3实现方案.md)**。
 
 ---
 
-## 七、构建
+# 给开发者
+
+## 六、架构总览
+
+插件分成两个严格分层：`core/` 是**纯 Java**（不 import 任何 Bukkit 类，构建护栏强制检查），
+承载全部规则与数值判定；`paper/` 是 Bukkit 适配层，把 core 的规则接到事件、实体与调度器上。
+这样设计的目的：规则可以被离线断言覆盖（见[构建与测试](#七构建与测试)），且将来换服务端平台时规则层可整体复用。
+
+```
+请求（按键 / 伤害 / 指令）
+   │ paper 层：监听器、命令、GUI、调度
+   ▼
+core 层：SkillDefinition / MatchRules / SengokuRules / TowerContest …（纯规则，无 Bukkit）
+   │
+   ▼
+paper 层执行：技能实现、实体、粒子、记分板、世界管理
+```
+
+关键子系统与入口：
+
+| 子系统 | 位置 | 职责 |
+| --- | --- | --- |
+| 技能战斗层 | `paper/skill/impl/` | 一个实现类对应 `weapons.yml` 的一个 `type`（20 种），`SkillTargets` 统一选目标（友伤保护 / 范围 / 视线锥 / 前置状态） |
+| 房间生命周期 | `paper/match/room/`（`GameRoom` / `RoomManager`） | `Phase = WAITING → STARTING → CAGED → PLAYING → ENDING` 的状态机，模板世界复制 / 回收，每秒 `tickAll()` 驱动 |
+| 战国 3v3 | `core/match/sengoku/` + `paper/match/sengoku/` | core 放赛制规整、超时判定、箭楼互锁等纯规则；paper 放 `SengokuSession` 编排与 `TowerManager` / `SiegeBreakerManager` 等 8 个管理器。`GameRoom.Phase` 语义不变，多局制完全由 `SengokuSession` 承担，对 PVP / PVE 零影响 |
+| 版本适配 | `version/`（`VersionAdapter`） | 属性 / 粒子 / 音效 / 药水名字的注册表解析，高版本改名不生效只告警不崩服 |
+| 配置 | `config/` | 加载、校验（写错的参数键启动即点名）、迁移（`config-version`） |
+| 持久化 | `data/` | YAML 存档：角色绑定、隐性标签、跨局战绩 |
+
+几处值得知道的取舍：
+
+- 箭楼争夺的互锁规则、击破器护栏判定都抽在 core 层，就是为了能用离线断言穷举组合；
+- 天守阁保护不维护「本局是否已攻陷」状态——读条完成立即结束小局，`isRunning` 自然变 false；
+- 跳跃台默认 TP 而非弹射：不受地形影响、必然抵达。
+
+## 七、构建与测试
 
 ### Gradle（有网络时）
 
@@ -565,42 +574,59 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 gradle build          # 产物在 build/libs/
 ```
 
-`build.gradle.kts` 内置两道护栏：`checkCorePurity`（`core/` 层出现 Bukkit / NMS 引用即失败）与 `checkParamKeys`（技能读取的参数键必须在校验表里登记）。
+`build.gradle.kts` 内置两道护栏：`checkCorePurity`（`core/` 层出现 Bukkit / NMS 引用即失败）与
+`checkParamKeys`（技能读取的参数键必须在校验表里登记）。
 
 ### 离线脚本（无网络、无 Gradle 时）
 
 ```powershell
-pwsh -File build-offline.ps1 -LibsDirs "<依赖 jar 目录>","<另一个目录>"
+powershell -NoProfile -ExecutionPolicy Bypass -File build-offline.ps1 -LibsDirs "<依赖 jar 目录>"
 ```
 
-只需要 **JDK 21** 与一份 **paper-api 1.21.4** jar（再加 adventure 系列的 api / key / minimessage 即可）。脚本会跑同样的两道护栏、编译、打包到 `build/dist/TaketoriKassen-<版本>.jar`。
+只需要 **JDK 21** 与一份 **paper-api 1.21.4** jar（再加 adventure 系列的 api / key / minimessage）。
+脚本会跑同样的两道护栏、编译 128 个源文件、打包到 `build/dist/TaketoriKassen-<版本>.jar`；
+版本号唯一来源是 `gradle.properties` 的 `version=`（`plugin.yml` 占位符、jar 文件名、启动日志都由它派生）。
 
-### 离线自检工具
+### 离线断言（无需启动服务器）
+
+`tools/` 下的测试类都是带 `main` 的独立断言，编译后直接跑：
 
 ```powershell
-# 核对 weapons.yml / characters.yml 里的材质、粒子、音效、药水、弹体、属性、技能类型与参数键
-java -cp "<依赖>;build/classes;build/check" WeaponYamlCheck src/main/resources
-
-# 多世界判定（接管白名单与播报范围）的纯逻辑回归
-java -cp "build/check;build/classes" WorldScopeTest
+javac -sourcepath src/main/java -d build/tools tools/SengokuRoundTest.java tools/TowerContestTest.java
+java -cp build/tools SengokuRoundTest      # 74 项：赛制规整 / 超时判定 / 平局语义 / 模式解析 / 能量规则
+java -cp build/tools TowerContestTest      # 39 项：箭楼互锁规则的各种组合
 ```
 
----
+其余工具：`WeaponYamlCheck`（核对 weapons.yml / characters.yml 里的材质、粒子、音效、药水、弹体、
+属性、技能类型与参数键）、`WorldScopeTest`（多世界判定回归）、`MiniMessageClickTest`、
+`BaseArgParserTest`、`WeaponYamlEditorTest`。
+
+### 面向开发的扩展点
+
+- **加一把武器 / 一个技能**：在 `weapons.yml` 里写数值，技能槽引用 20 种 `type` 之一并填参数键
+  （全部键在启动校验表里，写错会点名）；不需要写 Java。要新技能类型才需要新增 `paper/skill/impl/` 实现类。
+- **加一个角色**：`characters.yml` 加段即可（血量 / 移速 / 武器列表），同队不重复的约束自动生效。
+- **加一种对局模式**：参照战国 3v3 的分层——纯规则进 `core/match/`（可离线断言），
+  编排与管理器进 `paper/match/`，挂到 `GameRoom` 上但不改 `Phase` 语义。
+- **适配新版服务端**：`version/DefaultVersionAdapter` 的注册表里补新名字即可，不改调用点。
 
 ## 八、目录结构
 
 ```
 src/main/java/com/taketori/kassen/
-├─ core/        纯 Java 逻辑（角色 / 武器 / 技能定义、对局规则、世界范围判定），禁止引用 Bukkit
-├─ paper/       Bukkit 适配（监听器、技能实现、GUI、命令、对局与大堂管理）
+├─ core/        纯 Java 逻辑（角色 / 武器 / 技能定义、对局规则、战国规则、世界范围判定），禁止引用 Bukkit
+├─ paper/       Bukkit 适配（监听器、技能实现、GUI、命令、房间与大厅管理、战国管理器）
 │  ├─ skill/impl/   技能实现，一个类对应 weapons.yml 里的一个 type（20 种）
-│  └─ skill/SkillTargets.java  技能选目标的公共判定（友伤保护 / 范围 / 视线锥 / 前置状态）
+│  ├─ match/room/   GameRoom 状态机与 RoomManager（世界复制 / 回收）
+│  ├─ match/sengoku/  战国 3v3 编排（SengokuSession、箭楼 / 击破器 / 跳跃台 / 小兵 / 能量）
+│  └─ command/      TaketoriCommand / MatchCommand / AdminMenu / SengokuCommand
 ├─ version/     版本差异收口（属性 / 粒子 / 音效 / 药水的注册表解析）
 ├─ config/      配置加载、校验与迁移
 └─ data/        持久化（YAML 存档：角色绑定、隐性标签、跨局战绩）
 src/main/resources/
 ├─ plugin.yml / config.yml / weapons.yml / characters.yml / messages.yml
-docs/           多世界配置说明、武器与技能设计 2.0
+└─ sengoku.yml / sengoku-towers.yml / sengoku-siege.yml / sengoku-minions.yml / sengoku-energy.yml
+docs/           多世界配置、武器与技能设计 2.0、战国 3v3 实现方案
 tools/          离线测试与校验器（无需启动服务器）
 build-offline.ps1  无网络环境的构建脚本
 ```
