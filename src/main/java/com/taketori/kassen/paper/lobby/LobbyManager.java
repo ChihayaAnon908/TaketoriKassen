@@ -438,14 +438,22 @@ public final class LobbyManager {
     /**
      * 主动离开房间回大厅（{@code /taketori leave}、告示牌 leave、菜单按钮的统一入口）：
      * <ul>
+     *   <li>观众：退出观战并回大厅（SpectatorManager.leaveAudience）；阵亡旁观者提示等待复活；</li>
      *   <li>WAITING/STARTING：释放等待名额（房间倒计时自动重算），房间内播报，传送回大厅；</li>
      *   <li>CAGED/PLAYING 的参赛者：拒绝中途退出（要结束整局找管理员 stop）；</li>
      *   <li>ENDING / 无房间：直接送大厅。</li>
      * </ul>
-     * 观众身份请先由 SpectatorManager.leaveAudience 处理（指令里在本方法之前判断）。
      */
     public void returnToLobby(Player player) {
         if (player == null || !player.isOnline()) {
+            return;
+        }
+        if (plugin.spectator().leaveAudience(player)) {
+            return;
+        }
+        if (plugin.spectator().isSpectator(player)) {
+            player.sendMessage(MINI.deserialize(
+                    "<gray>你正在等待复活（阵亡旁观），稍后会自动回到战场，不需要退出。"));
             return;
         }
         GameRoom room = plugin.rooms().roomOf(player);

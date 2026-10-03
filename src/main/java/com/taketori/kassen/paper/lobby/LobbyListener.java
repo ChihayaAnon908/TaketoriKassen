@@ -86,17 +86,10 @@ public final class LobbyListener implements Listener {
     }
 
     /**
-     * leave 告示牌：观众先退观众；否则走与 {@code /taketori leave} 相同的
-     * LobbyManager.returnToLobby（等待区退房回大厅 / 对局中拒绝，文案统一）。
+     * leave 告示牌：观众先退观众；等待区退房回大厅 / 对局中拒绝，
+     * 全部逻辑在 LobbyManager.returnToLobby 统一处理。
      */
     private void leaveViaSign(Player player) {
-        if (plugin.spectator().leaveAudience(player)) {
-            return;
-        }
-        if (plugin.spectator().isSpectator(player)) {
-            player.sendMessage(MINI.deserialize("<gray>你正在等待复活（阵亡旁观），稍后会自动回到战场，不需要退出。"));
-            return;
-        }
         plugin.lobby().returnToLobby(player);
     }
 

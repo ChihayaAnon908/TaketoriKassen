@@ -298,7 +298,7 @@ public final class PlayerMenu implements Listener {
                 case 12 -> openTeam(player);
                 case 13 -> {
                     player.closeInventory();
-                    plugin.lobby().sendToLobby(player);
+                    plugin.lobby().returnToLobby(player);
                 }
                 case 14 -> {
                     // 只有等待区内才允许打开；大厅点击（灰色按钮）无反应

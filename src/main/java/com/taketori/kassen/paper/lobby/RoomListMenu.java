@@ -271,7 +271,7 @@ public final class RoomListMenu implements Listener {
             case SLOT_REFRESH -> render(session);
             case SLOT_LOBBY -> {
                 player.closeInventory();
-                plugin.lobby().sendToLobby(player);
+                plugin.lobby().returnToLobby(player);
             }
             default -> {
             }

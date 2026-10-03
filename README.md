@@ -244,7 +244,7 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 ```
 /taketori match start [房间id]     # 对目标房间开局（双方各至少 1 人）
 /taketori match force [房间id]     # 人数不够也开（只按该房等待区现有的人分队）
-/taketori match stop [房间id]      # 结束指定房间（不影响其他并发房间）
+/taketori match stop [房间id]      # 结束指定房间（不影响其他并发房间；等待/倒计时阶段则直接解散房间，房内玩家回大厅）
 /taketori match status             # 逐房间查看阶段 / 人数 / 比分 / 剩余时间
 ```
 
@@ -439,7 +439,7 @@ TaketoriKassen v1.4.2 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 ```
 /taketori match start [场地id]                   对指定房间开局（双方各至少 1 人）
 /taketori match force [场地id]                   人数不够也开（只按该房等待区的人分队）
-/taketori match stop [场地id] [原因]             结束指定房间（不影响其他并发房间）
+/taketori match stop [场地id] [原因]             结束指定房间（不影响其他并发房间）；等待/倒计时阶段则直接解散房间，房内玩家回大厅
 /taketori match status                           逐房间列出阶段 / 比分 / 剩余 / 基地 / 场上月人
 /taketori match mode <pvp|pve> [场地id]          切换指定房间模式（仅等待中可切，不写全局配置）
 /taketori match difficulty <easy|normal|hard>    同下面的 pve difficulty

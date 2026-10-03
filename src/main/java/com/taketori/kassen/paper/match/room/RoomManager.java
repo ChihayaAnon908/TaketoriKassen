@@ -542,9 +542,28 @@ public final class RoomManager {
         return null;
     }
 
+    /**
+     * 已通过白名单校验的 moonmap 名字登记表：方法体里用于拼路径的名字都从这里取规范名，
+     * 白名单外的输入（路径分隔符、{@code ..} 等）永远进不了文件操作。
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, String> validatedMoonmapNames =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * moonmap 模板名 / 世界名白名单：小写字母数字、下划线、连字符（世界名另允许大写）。
+     * 返回登记表里的规范名；不合格返回 null。
+     */
+    private String validatedMoonmapName(String raw, String pattern) {
+        if (raw == null || !raw.matches(pattern)) {
+            return null;
+        }
+        return validatedMoonmapNames.computeIfAbsent(raw, name -> name);
+    }
+
     /** 从零创建一个平坦模板世界：生成 → 卸载 → 收进 moonmaps/&lt;名&gt; 并注册模板定义，随后可 load 进去编辑。 */
-    public void createMoonmap(Player admin, String templateName) {
-        if (!com.taketori.kassen.paper.match.ArenaManager.isValidId(templateName)) {
+    public void createMoonmap(Player admin, String rawTemplateName) {
+        final String templateName = validatedMoonmapName(rawTemplateName, "[a-z0-9_-]{1,32}");
+        if (templateName == null) {
             admin.sendMessage(plugin.config().messages().get("room.arena-bad-id"));
             return;
         }
@@ -1054,7 +1073,12 @@ public final class RoomManager {
      * 加载模板编辑世界：把 {@code moonmaps/<名>} 复制到服务器根目录为 {@code k_tpl_<名>}
      * 并加载，管理员进入后用现有选区指令划定区域/点位（写入 arenas.yml）。
      */
-    public void loadMoonmap(Player admin, String templateName) {
+    public void loadMoonmap(Player admin, String rawTemplateName) {
+        final String templateName = validatedMoonmapName(rawTemplateName, "[a-z0-9_-]{1,32}");
+        if (templateName == null) {
+            admin.sendMessage(plugin.config().messages().get("room.arena-bad-id"));
+            return;
+        }
         String worldName = TEMPLATE_EDIT_PREFIX + templateName;
         World existing = Bukkit.getWorld(worldName);
         if (existing != null) {
@@ -1147,7 +1171,12 @@ public final class RoomManager {
      * 模板名对齐成场地 id），必须走这个回调：写回是异步的，在方法返回后立刻改名会与写回
      * 抢同一个文件夹——新图会落在旧名下（房间按 id 读到旧图），或改出一个半截模板。</p>
      */
-    public void unloadMoonmap(Player admin, String templateName, Runnable onSuccess) {
+    public void unloadMoonmap(Player admin, String rawTemplateName, Runnable onSuccess) {
+        final String templateName = validatedMoonmapName(rawTemplateName, "[a-z0-9_-]{1,32}");
+        if (templateName == null) {
+            admin.sendMessage(plugin.config().messages().get("room.arena-bad-id"));
+            return;
+        }
         String worldName = TEMPLATE_EDIT_PREFIX + templateName;
         World world = Bukkit.getWorld(worldName);
         if (world == null) {
@@ -1294,14 +1323,21 @@ public final class RoomManager {
      * <p>世界正加载着时先 {@code world.save()} 刷盘再复制，保证磁盘上是完整数据；
      * 复制在 worldIo 线程异步进行，期间该模板名的 load/unload 会被挂起（pendingMoonmaps）。</p>
      */
-    public void importMoonmap(Player admin, String worldName, String arenaId) {
-        if (admin == null || !admin.isOnline() || worldName == null || worldName.isBlank()
-                || arenaId == null || arenaId.isBlank()) {
+    public void importMoonmap(Player admin, String rawWorldName, String rawArenaId) {
+        if (admin == null || !admin.isOnline() || rawWorldName == null || rawWorldName.isBlank()
+                || rawArenaId == null || rawArenaId.isBlank()) {
             return;
         }
-        arenaId = arenaId.toLowerCase(java.util.Locale.ROOT);
-        final String templateKey = arenaId;
-        if (!com.taketori.kassen.paper.match.ArenaManager.isValidId(templateKey)) {
+        // 世界名同样直接拼路径，只收普通文件夹名（允许大写），拒绝分隔符与 ..
+        final String worldName = validatedMoonmapName(rawWorldName, "[A-Za-z0-9_-]{1,64}");
+        if (worldName == null) {
+            admin.sendMessage(plugin.config().messages().get("room.import-not-world", "world", rawWorldName));
+            return;
+        }
+        final String templateKey = validatedMoonmapName(
+                rawArenaId.toLowerCase(java.util.Locale.ROOT), "[a-z0-9_-]{1,32}");
+        if (templateKey == null
+                || !com.taketori.kassen.paper.match.ArenaManager.isValidId(templateKey)) {
             admin.sendMessage(plugin.config().messages().get("room.arena-bad-id"));
             return;
         }

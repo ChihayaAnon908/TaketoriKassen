@@ -1286,17 +1286,22 @@ public final class GameRoom {
         }
     }
 
-    /** 管理员手动结束：倒计时中取消回 WAITING；笼内/战斗中进入 ENDING 结算。 */
-    public void stop(String reason) {
-        if (phase == Phase.WAITING || phase == Phase.ENDING) {
-            return;
+    /**
+     * 管理员手动结束：等待/倒计时阶段直接解散房间（房内玩家送回大厅）；
+     * 笼内/战斗中进入 ENDING 结算。返回 false 表示房间已在结算中，无需重复操作。
+     */
+    public boolean stop(String reason) {
+        if (phase == Phase.ENDING) {
+            return false;
         }
-        if (phase == Phase.STARTING) {
-            cancelStarting(reason);
-            return;
+        if (phase == Phase.WAITING || phase == Phase.STARTING) {
+            broadcast("<yellow>房间被管理员解散：" + reason);
+            manager.destroyRoom(this, true);
+            return true;
         }
         broadcast("<yellow>对局被结束：" + reason);
         settle(null, false);
+        return true;
     }
 
     /**
@@ -1455,15 +1460,6 @@ public final class GameRoom {
                 broadcast("<red>自动开局失败：<gray>" + error);
             }
         }
-    }
-
-    /** 管理员在倒计时阶段取消：回到 WAITING 并说明原因。 */
-    private void cancelStarting(String reason) {
-        phase = Phase.WAITING;
-            countdownMillis = 0L;
-            countdownFull = false;
-            countdownHalf = false;
-            broadcast("<yellow>开局倒计时已取消：<gray>" + reason);
     }
 
     /** CAGED/PLAYING 全员离线：不写战绩、不播报胜负，直接停组件收房。 */

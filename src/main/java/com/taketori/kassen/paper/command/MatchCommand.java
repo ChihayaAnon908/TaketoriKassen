@@ -128,7 +128,10 @@ public final class MatchCommand {
                     send(sender, "<gray>用法：/taketori moonmap create <模板名>（生成平坦模板世界到 moonmaps/<模板名>）");
                     return;
                 }
-                plugin.rooms().createMoonmap(player, args[2].toLowerCase(Locale.ROOT));
+                String name = args[2].toLowerCase(Locale.ROOT);
+                if (requireSafeTemplateName(sender, name)) {
+                    plugin.rooms().createMoonmap(player, name);
+                }
             }
             case "import" -> {
                 if (args.length < 4) {
@@ -137,24 +140,46 @@ public final class MatchCommand {
                             + "（世界加载着也没关系，会先自动存盘再复制）。");
                     return;
                 }
-                plugin.rooms().importMoonmap(player, args[2], args[3].toLowerCase(Locale.ROOT));
+                if (!args[2].matches("[A-Za-z0-9_-]{1,64}")) {
+                    send(sender, "<red>世界名只能用字母、数字、下划线、连字符。");
+                    return;
+                }
+                String arenaId = args[3].toLowerCase(Locale.ROOT);
+                if (requireSafeTemplateName(sender, arenaId)) {
+                    plugin.rooms().importMoonmap(player, args[2], arenaId);
+                }
             }
             case "load" -> {
                 if (args.length < 3) {
                     send(sender, "<gray>用法：/taketori moonmap load <模板名>（复制 moonmaps/<模板名> 为编辑世界 k_tpl_<模板名>）");
                     return;
                 }
-                plugin.rooms().loadMoonmap(player, args[2].toLowerCase(Locale.ROOT));
+                String name = args[2].toLowerCase(Locale.ROOT);
+                if (requireSafeTemplateName(sender, name)) {
+                    plugin.rooms().loadMoonmap(player, name);
+                }
             }
             case "unload" -> {
                 if (args.length < 3) {
                     send(sender, "<gray>用法：/taketori moonmap unload <模板名>（保存并卸载编辑世界，写回 moonmaps/<模板名>）");
                     return;
                 }
-                plugin.rooms().unloadMoonmap(player, args[2].toLowerCase(Locale.ROOT));
+                String name = args[2].toLowerCase(Locale.ROOT);
+                if (requireSafeTemplateName(sender, name)) {
+                    plugin.rooms().unloadMoonmap(player, name);
+                }
             }
             default -> listMoonmaps(sender);
         }
+    }
+
+    /** 模板名会直接拼进 moonmaps/ 与世界容器路径，指令入口就拦下路径分隔符与 ..。 */
+    private boolean requireSafeTemplateName(CommandSender sender, String name) {
+        if (!name.matches("[a-z0-9_-]{1,32}")) {
+            send(sender, "<red>模板名只能用小写字母、数字、下划线、连字符（≤32 位）。");
+            return false;
+        }
+        return true;
     }
 
     /** moonmap list：逐模板输出地图文件夹与 arenas.yml 定义的对应状态（_bak 备份目录不列出）。 */
@@ -251,8 +276,12 @@ public final class MatchCommand {
             send(sender, "<red>没有可用房间。");
             return;
         }
-        target.stop(reason);
-        send(sender, "<yellow>已结束房间 " + target.display() + "。");
+        String display = target.display();
+        if (target.stop(reason)) {
+            send(sender, "<yellow>已结束房间 " + display + "。");
+        } else {
+            send(sender, "<gray>房间 " + display + " 正在结算中，无需重复结束。");
+        }
     }
 
     // ---------------------------------------------------------------- pve
@@ -525,14 +554,7 @@ public final class MatchCommand {
             send(sender, "<red>你没有 taketori.play 权限。");
             return;
         }
-        if (plugin.spectator().leaveAudience(player)) {
-            return;   // 已经是观众，退出完成（消息在 leaveAudience 里发）
-        }
-        if (plugin.spectator().isSpectator(player)) {
-            send(sender, "<gray>你正在等待复活（阵亡旁观），稍后会自动回到战场，不需要退出。");
-            return;
-        }
-        // 等待中退出/对局中拒绝/无房间提示，文案与播报都在 LobbyManager 统一处理
+        // 观众退出/阵亡旁观提示/等待中退出/对局中拒绝/无房间提示，文案与播报都在 LobbyManager 统一处理
         plugin.lobby().returnToLobby(player);
     }
 
