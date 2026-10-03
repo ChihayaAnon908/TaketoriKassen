@@ -313,6 +313,22 @@ public final class ArenaDef {
         return List.copyOf(regions);
     }
 
+    /**
+     * normal 标签的月人刷新区（按编号升序）。normal 独立循环只在这些区之间轮转均分；
+     * 列表为空说明没有 normal 区，该循环不启动。
+     */
+    public List<CuboidRegion> normalMinionRegionList() {
+        List<Integer> indices = new ArrayList<>(minionRegions.keySet());
+        indices.sort(Integer::compareTo);
+        List<CuboidRegion> regions = new ArrayList<>(indices.size());
+        for (Integer index : indices) {
+            if (REGION_KIND_NORMAL.equals(minionRegionKind(index))) {
+                regions.add(minionRegions.get(index));
+            }
+        }
+        return List.copyOf(regions);
+    }
+
     public int minionRegionCount() {
         return minionRegions.size();
     }

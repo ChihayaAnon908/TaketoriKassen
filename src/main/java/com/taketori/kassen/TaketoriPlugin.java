@@ -724,6 +724,19 @@ public final class TaketoriPlugin extends JavaPlugin {
         }
         applyCharacterAttributes(player, character);
         giveLoadoutArmor(player);
+        giveCharacterExtras(player, characterId);
+    }
+
+    /**
+     * 角色专属的开局补给：乃依的弓开一局配 1 支箭。
+     *
+     * <p>只在本方法被调用（开局发放 / 对局中换角色补装）时执行一次——开局流程先清空背包，
+     * 不存在重复叠加；乃依的无箭射击（背包没箭也射得出）不受影响，这支箭只是开局备用。</p>
+     */
+    private void giveCharacterExtras(Player player, String characterId) {
+        if ("noi".equals(characterId)) {
+            player.getInventory().addItem(new ItemStack(Material.ARROW, 1));
+        }
     }
 
     /**

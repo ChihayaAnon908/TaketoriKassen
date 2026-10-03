@@ -262,10 +262,18 @@ public final class CombatListener implements Listener {
         if (event.getCause() != EntityDamageEvent.DamageCause.FALL) {
             return;
         }
-        if (event.getEntity() instanceof Player player
-                && plugin.states().isFallImmune(player.getUniqueId())) {
+        if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+        if (plugin.states().isFallImmune(player.getUniqueId())) {
             event.setCancelled(true);
             debug(player.getName() + " 的摔落伤害被免伤窗口取消");
+            return;
+        }
+        // 正式对局（玻璃笼 + 战斗中）摔落伤害一律取消；对局外玩家保持原版
+        if (plugin.inRunningMatch(player)) {
+            event.setCancelled(true);
+            debug(player.getName() + " 的摔落伤害被对局豁免取消");
         }
     }
 
@@ -500,6 +508,10 @@ public final class CombatListener implements Listener {
                     continue;
                 }
                 if (shooter != null && shooter.equals(nearby)) {
+                    continue;
+                }
+                // 受保护的队友与召唤物整个跳过：伤害会被事件层取消，但范围伤害本身不该结算
+                if (shooter instanceof Player owner && SkillTargets.isFilteredTarget(plugin, owner, living)) {
                     continue;
                 }
                 if (shooter instanceof Player owner) {

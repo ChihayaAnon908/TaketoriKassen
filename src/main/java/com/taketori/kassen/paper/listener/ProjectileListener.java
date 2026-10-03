@@ -72,6 +72,10 @@ public final class ProjectileListener implements Listener {
                         continue;
                     }
                 }
+                // 受保护的队友与召唤物整个跳过：否则伤害被事件层取消，但状态与击退会照常泄漏
+                if (shooter instanceof Player owner && SkillTargets.isFilteredTarget(plugin, owner, living)) {
+                    continue;
+                }
                 // 镜面反射：被打的人正处于反射窗口 → 不结算伤害，改为把弹体弹回去
                 if (nearby instanceof Player victim && !victim.equals(shooter) && shooter != null) {
                     CombatStates.Reflection reflection = plugin.states().reflection(victim.getUniqueId());

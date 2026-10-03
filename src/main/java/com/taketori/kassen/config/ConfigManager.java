@@ -716,6 +716,11 @@ public final class ConfigManager {
         return Math.max(0.0D, Math.min(1.0D, plugin.getConfig().getDouble("combat.melee-charge-gate", 0.9D)));
     }
 
+    /** 对局期间是否给参赛者自动续 Saturation（默认开；关闭后对局内饥饿照常消耗）。 */
+    public boolean matchSaturation() {
+        return plugin.getConfig().getBoolean("combat.match-saturation", true);
+    }
+
     /** 房间世界名前缀（房间世界 = 前缀 + 自增序号）。 */
     public String roomWorldPrefix() {
         return plugin.getConfig().getString("room.world-prefix", "kassen_");

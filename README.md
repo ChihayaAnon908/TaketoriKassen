@@ -498,9 +498,9 @@ TaketoriKassen v1.5.0 已启用：20 把武器 / 9 个角色 / 20 种技能类�
 | `waiting` | `min-players` / `countdown-seconds` / `half-countdown-seconds` / `full-countdown-seconds` / `cage-hold-seconds` / `end-delay-seconds` / `cage-material` / `pve-full-players` / `void-y-offset` / `protect` | 2 / 90 / 30 / 5 / 3 / 5 / GLASS / 0（取 team-size）/ -10 / true |
 | `room` | `max-rooms` / `max-rooms-per-player` / `world-prefix` / `default-template` / `empty-dispose-seconds` / `understaffed-grace-seconds` | 8 / 1 / kassen_ / kaguya / 60 / 60 |
 | `scoring` | `minion-kill` / `player-kill` / `base-capture` | 3 / 10 / 50 |
-| `combat` | `kill-heal` / `minion-kill-heal` / `friendly-fire-protection` / `third-slot-buff` | 6.0 / 0.0 / auto / 2 秒跳跃提升 V |
+| `combat` | `kill-heal` / `minion-kill-heal` / `friendly-fire-protection` / `third-slot-buff` / `match-saturation` | 6.0 / 0.0 / auto / 2 秒跳跃提升 V / true（对局内自动饱和） |
 | `loadout` | `armor-enabled` / `armor-material` / `armor-protection` | true / IRON / 2（保护 II） |
-| `minion` | `health` / `iron-armor` / `interval-seconds` / `per-spawn` / `max-alive` / `types` / `elite` | 40 / true / 9 / 3 / 15 / 僵尸骷髅权重 / 每 5 波 |
+| `minion` | `health` / `iron-armor` / `interval-seconds` / `per-spawn` / `max-alive` / `types` / `elite` / `normal.*` / `mixed.*` | 40 / true / 9 / 3 / 15 / 僵尸骷髅权重 / 每 5 波 / normal 与 mixed 两类刷新区各自的独立循环（enabled + interval-seconds，未配置回落全局间隔） |
 | `pve` | `difficulty` / `big-waves` / `elite-scaling` / `outpost` | normal / 5 波·8 精英·60 秒 / 每多 1 人 +1 级 / 三档数值 |
 | `base` | `count-per-team` / `capture-seconds` / `capture-delay-seconds` / `decay-per-second` / `multi-player-bonus` | 3（或 auto）/ 10 / 60 / 0.5 / true |
 | `lobby` | `teleport-on-join` / `takeover-worlds` / `protect` / `return-after-match` | true / `[]`（仅大厅世界）/ true / true |

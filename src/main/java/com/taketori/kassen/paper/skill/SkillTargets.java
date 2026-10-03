@@ -2,10 +2,13 @@ package com.taketori.kassen.paper.skill;
 
 import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.core.match.TeamId;
+import com.taketori.kassen.paper.item.PDCKeys;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
@@ -14,11 +17,11 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 技能选目标的公共判定：友伤保护、圆形范围、视线扇形。
+ * 技能选目标的公共判定：友伤保护、召唤物护栏、圆形范围、视线扇形。
  *
  * <p>抽出来的原因：2.0 版新增的 {@code mark_apply} / {@code armor_break} 等技能都要用同一套
  * "谁算敌人"的规则，散在各类里复制粘贴迟早会走偏（例如漏掉旁观者、或把队友也算成目标）。
- * 判定口径与 {@code MeleeSmashSkill} 原有实现保持一致。</p>
+ * 玩家对玩家与玩家对月人两条伤害链共用这里，保证同一攻击对两类目标的判定口径一致。</p>
  */
 public final class SkillTargets {
 
@@ -42,6 +45,41 @@ public final class SkillTargets {
         return casterTeam != null && casterTeam == otherTeam;
     }
 
+    /**
+     * 目标是不是"不该被打的召唤物"：主人本人，或主人受友伤保护的队友——
+     * 口径与 {@code CombatListener#onSummonedDamage} 的事件级护栏一致。
+     * 是则整个目标跳过（伤害、击退、状态都不施加），否则忠犬会被自家范围技能挂满状态。
+     */
+    public static boolean isProtectedSummon(TaketoriPlugin plugin, Player caster, LivingEntity target) {
+        String ownerId = target.getPersistentDataContainer()
+                .get(PDCKeys.summonedOwner(), PersistentDataType.STRING);
+        if (ownerId == null) {
+            return false;
+        }
+        if (caster.getUniqueId().toString().equals(ownerId)) {
+            return true;
+        }
+        Player owner;
+        try {
+            owner = Bukkit.getPlayer(UUID.fromString(ownerId));
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
+        return owner != null && isProtectedTeammate(plugin, owner, caster);
+    }
+
+    /**
+     * 统一的"这个目标要不要整个跳过"判定：受保护的队友 / 旁观者玩家、受保护的召唤物。
+     * 所有范围类结算（近战扇形、冲击波、弹体溅射、箭矢溅射）都应先过这里，
+     * 保证玩家目标与月人目标走同一套过滤口径。
+     */
+    public static boolean isFilteredTarget(TaketoriPlugin plugin, Player caster, LivingEntity target) {
+        if (target instanceof Player other) {
+            return isUntargetable(other) || isProtectedTeammate(plugin, caster, other);
+        }
+        return isProtectedSummon(plugin, caster, target);
+    }
+
     /** 旁观者（或非存活）跳过。 */
     public static boolean isUntargetable(Player player) {
         return player == null || player.isDead() || player.getGameMode().name().equals("SPECTATOR");
@@ -58,8 +96,7 @@ public final class SkillTargets {
             if (!(entity instanceof LivingEntity living) || entity.equals(caster) || living.isDead()) {
                 continue;
             }
-            if (entity instanceof Player other
-                    && (isUntargetable(other) || isProtectedTeammate(plugin, caster, other))) {
+            if (isFilteredTarget(plugin, caster, living)) {
                 continue;
             }
             targets.add(living);
@@ -69,7 +106,7 @@ public final class SkillTargets {
 
     /**
      * 视线前方、半径 {@code range} 内、与视线夹角不超过 {@code halfAngleDegrees} 的敌方生物。
-     * 与 {@code MeleeSmashSkill} 的扇形筛选同口径。
+     * 与近战扇形同口径（MeleeSmashSkill 也走这里）。
      */
     public static List<LivingEntity> enemiesInCone(TaketoriPlugin plugin, Player caster,
                                                    double range, double halfAngleDegrees) {
@@ -81,8 +118,7 @@ public final class SkillTargets {
             if (!(entity instanceof LivingEntity living) || entity.equals(caster) || living.isDead()) {
                 continue;
             }
-            if (entity instanceof Player other
-                    && (isUntargetable(other) || isProtectedTeammate(plugin, caster, other))) {
+            if (isFilteredTarget(plugin, caster, living)) {
                 continue;
             }
             Vector toTarget = living.getLocation().add(0.0D, living.getHeight() * 0.5D, 0.0D)

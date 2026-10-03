@@ -4,6 +4,7 @@ import com.taketori.kassen.TaketoriPlugin;
 import com.taketori.kassen.paper.skill.Skill;
 import com.taketori.kassen.paper.skill.SkillContext;
 import com.taketori.kassen.paper.skill.SkillResult;
+import com.taketori.kassen.paper.skill.SkillTargets;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -63,7 +64,7 @@ public final class ShockwaveSkill implements Skill {
             if (!(entity instanceof LivingEntity living) || entity.equals(player) || living.isDead()) {
                 continue;
             }
-            if (entity instanceof Player other && other.getGameMode().name().equals("SPECTATOR")) {
+            if (SkillTargets.isFilteredTarget(plugin, player, living)) {
                 continue;
             }
             double distance = living.getLocation().distance(center);

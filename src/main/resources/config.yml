@@ -200,6 +200,8 @@ combat:
   #   auto = PVP 与 PVE 模式均开启（默认）
   #   on   = 两种模式都保护      off = 两种模式都不保护
   friendly-fire-protection: auto
+  # 对局期间给参赛者自动续饱和（Saturation），对局外玩家不受影响；false = 饥饿照常消耗
+  match-saturation: true
   # 开局与复活后的临时增益（"出生保护"），持续 duration-seconds 秒
   # effects 里的名字用原版药水效果名，amplifier 0 = I 级
   spawn-buff:
@@ -236,9 +238,18 @@ loadout:
 minion:
   health: 40           # 普通月人血量
   iron-armor: true     # 普通月人是否穿全套铁甲
-  interval-seconds: 9  # 刷新间隔（秒）—— 每刷新一批算「一波」（全局默认，可按场地覆盖）
-  per-spawn: 3         # 每波刷新的普通月人数量（全局默认，可按场地覆盖）
+  interval-seconds: 9  # 刷新间隔（秒）——两类刷新区未单独配置时的回落值（全局默认，普通区可按场地覆盖）
+  per-spawn: 3         # 每批刷新的普通月人数量（全局默认，可按场地覆盖）
   max-alive: 15        # 场上普通月人上限（达到就停止刷新；全局默认，可按场地覆盖）
+  # normal 与 mixed 两类刷新区各走一条独立计时循环，互不影响：
+  #   normal 循环 → 只刷 kind: normal 的区     mixed 循环 → 只刷 kind: mixed 的区（精英波也在这条循环里）
+  # enabled: false 的那条循环不启动、对应类型区域不刷怪；interval-seconds 未写时回落上面的全局值
+  normal:
+    enabled: true
+    interval-seconds: 9
+  mixed:
+    enabled: true
+    interval-seconds: 9
   # 普通月人的种类与权重：每波按权重随机抽一种
   #   ZOMBIE = 僵尸、SKELETON = 骷髅（弓手）；也可以填其它原版实体名
   types:

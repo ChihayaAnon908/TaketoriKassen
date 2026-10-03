@@ -35,7 +35,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <ul>
  *   <li><b>多种类</b>：<code>minion.types</code> 里写实体名与权重（例如 <code>ZOMBIE: 3</code> /
  *       <code>SKELETON: 2</code>），每次刷新按权重随机抽一种；</li>
- *   <li><b>波次</b>：每刷新一批算一波；每 <code>minion.elite.every-waves</code> 波出一批精英
+ *   <li><b>两类刷新区两条独立循环</b>：normal 标签区与 mixed 标签区各自拥有独立的计时器
+ *       （<code>minion.normal.*</code> / <code>minion.mixed.*</code>，可分别启用与配间隔），
+ *       互不共享计数与生命周期；mixed 循环还负责精英波（每 N 波出精英）；</li>
+ *   <li><b>波次</b>：mixed 循环每刷新一批算一波；每 <code>minion.elite.every-waves</code> 波出一批精英
  *       （钻甲 + 药水 buff + 可配攻击力），并全服播报；</li>
  *   <li><b>上限</b>：普通月人与精英各有独立上限，达到就不再刷，避免拖垮服务器；</li>
  *   <li>关闭白天燃烧：僵尸与骷髅白天不会自己烧死；</li>
@@ -51,15 +54,18 @@ public final class MinionSpawner {
     private final TaketoriPlugin plugin;
     private final Set<UUID> minions = ConcurrentHashMap.newKeySet();
     private final Set<UUID> elites = ConcurrentHashMap.newKeySet();
-    private BukkitTask task;
-    /** 本局波次：每刷新一批 +1，用于"每 N 波出精英"。 */
-    private int wave;
-    /** PVE 大波次：独立于常规刷怪的节奏（默认 5 波、约 1 分钟一波、每波 8 精英）。 */
+    /** normal 标签区的独立循环：只在这些区之间轮转刷普通月人。 */
+    private BukkitTask normalTask;
+    /** mixed 标签区的独立循环：普通月人 + 精英波，与 normal 循环互不影响。 */
+    private BukkitTask mixedTask;
+    /** mixed 循环波次：每刷新一批 +1，用于"每 N 波出精英"（记分板显示的就是它）。 */
+    private int mixedWave;
+    /** PVE 大波次：独立于上述两条循环的节奏（默认 5 波、约 1 分钟一波、每波 8 精英）。 */
     private BukkitTask bigWaveTask;
     private int bigWave;
-    /** 轮转游标：普通月人按全部刷新区顺序依次取区（均等分布）。 */
+    /** 轮转游标：normal 循环只按 normal 标签区顺序依次取区（均等分布）。 */
     private int normalRegionCursor;
-    /** 轮转游标：精英月人只按 mixed 标签区顺序依次取区（均等分布）。 */
+    /** 轮转游标：mixed 循环与精英月人只按 mixed 标签区顺序依次取区（均等分布）。 */
     private int mixedRegionCursor;
 
     public MinionSpawner(GameRoom room) {
@@ -67,9 +73,9 @@ public final class MinionSpawner {
         this.plugin = room.plugin();
     }
 
-    /** 当前波次（记分板显示）。 */
+    /** 当前波次（mixed 循环计数，记分板显示）。 */
     public int wave() {
-        return wave;
+        return mixedWave;
     }
 
     /** 已经放过几个大波次（PVE）。 */
@@ -79,15 +85,27 @@ public final class MinionSpawner {
 
     public void start() {
         stop();
-        wave = 0;
+        mixedWave = 0;
         normalRegionCursor = 0;
         mixedRegionCursor = 0;
         MatchRules rules = room.rules();
-        long interval = Math.max(20L, rules.minionIntervalSeconds() * 20L);
-        task = plugin.scheduler().runTimerTask(this::tick, interval, interval);
+
+        // normal 区独立循环：只在 normal 标签区刷普通月人；关闭或没有该类型区域时整条循环不启动
+        if (rules.minionNormalEnabled() && !room.arena().normalMinionRegionList().isEmpty()) {
+            long normalInterval = Math.max(20L, rules.minionNormalIntervalSeconds() * 20L);
+            normalTask = plugin.scheduler().runTimerTask(this::normalTick, normalInterval, normalInterval);
+        }
+        // mixed 区独立循环：普通月人 + 精英波，与 normal 循环互不影响
+        if (rules.minionMixedEnabled() && !room.arena().mixedMinionRegionList().isEmpty()) {
+            long mixedInterval = Math.max(20L, rules.minionMixedIntervalSeconds() * 20L);
+            mixedTask = plugin.scheduler().runTimerTask(this::mixedTick, mixedInterval, mixedInterval);
+        }
         if (plugin.config().debug()) {
-            plugin.getLogger().info("[room " + room.id() + "] 月人刷新启动：每 " + rules.minionIntervalSeconds()
-                    + " 秒 " + rules.minionPerSpawn() + " 只，上限 " + rules.minionMaxAlive()
+            plugin.getLogger().info("[room " + room.id() + "] 月人刷新启动：normal 循环 "
+                    + (normalTask != null ? "每 " + rules.minionNormalIntervalSeconds() + " 秒" : "未启动")
+                    + "，mixed 循环 "
+                    + (mixedTask != null ? "每 " + rules.minionMixedIntervalSeconds() + " 秒" : "未启动")
+                    + "，每批 " + rules.minionPerSpawn() + " 只，上限 " + rules.minionMaxAlive()
                     + "；精英每 " + plugin.minionTypes().elite().everyWaves() + " 波");
         }
         // 全部刷新区都是 normal 标签时，精英（精英波 / PVE 大波次）没有可用的刷新区
@@ -172,12 +190,16 @@ public final class MinionSpawner {
     }
 
     public void stop() {
-        if (task != null) {
-            task.cancel();
-            task = null;
+        if (normalTask != null) {
+            normalTask.cancel();
+            normalTask = null;
+        }
+        if (mixedTask != null) {
+            mixedTask.cancel();
+            mixedTask = null;
         }
         cancelBigWaves();
-        wave = 0;
+        mixedWave = 0;
         bigWave = 0;
         removeAll();
     }
@@ -236,32 +258,39 @@ public final class MinionSpawner {
 
     // ---------------------------------------------------------------- 刷新
 
-    private void tick() {
+    /**
+     * normal 区循环：只从 normal 标签区轮转刷普通月人。
+     * 与 mixed 循环没有共享的计数或游标——这条循环停了、慢了、间隔改了，都不影响 mixed 区。
+     */
+    private void normalTick() {
         if (!room.isRunning()) {
             return;
         }
-        // 场地可以划多个刷新区：普通月人按区顺序轮转取区，长期各区间刷新数量严格均等
-        if (room.arena().minionRegionCount() == 0) {
+        List<CuboidRegion> regions = room.arena().normalMinionRegionList();
+        if (regions.isEmpty()) {
             return;
         }
-        MatchRules rules = room.rules();
-        wave++;
+        spawnRegularMinions(regions, () -> regions.get(Math.floorMod(normalRegionCursor++, regions.size())));
+    }
 
-        // 普通月人
-        int budget = rules.minionMaxAlive() - aliveCount();
-        if (budget > 0) {
-            int count = Math.min(budget, Math.max(1, rules.minionPerSpawn()));
-            for (int i = 0; i < count; i++) {
-                CuboidRegion region = nextNormalRegion();
-                if (region != null && region.world() != null) {
-                    spawnNormal(region, rules);
-                }
-            }
+    /**
+     * mixed 区循环：从 mixed 标签区轮转刷普通月人，并用<b>自己的</b>波次计数驱动精英波。
+     * 精英仍然只落在 mixed 区——与 normal 循环的节奏完全无关。
+     */
+    private void mixedTick() {
+        if (!room.isRunning()) {
+            return;
         }
+        List<CuboidRegion> regions = room.arena().mixedMinionRegionList();
+        if (regions.isEmpty()) {
+            return;
+        }
+        mixedWave++;
+        spawnRegularMinions(regions, () -> regions.get(Math.floorMod(mixedRegionCursor++, regions.size())));
 
         // 精英波：不受普通上限限制，只受自己的上限约束
         MinionTypes.Elite elite = plugin.minionTypes().elite();
-        if (elite.isEliteWave(wave)) {
+        if (elite.isEliteWave(mixedWave)) {
             int slots = elite.maxAlive() - eliteCount();
             int count = Math.min(Math.max(0, slots), elite.count());
             for (int i = 0; i < count; i++) {
@@ -271,30 +300,29 @@ public final class MinionSpawner {
                 }
             }
             if (count > 0) {
-                room.broadcast("<dark_red>第 " + wave + " 波：<bold>精英月人</bold>出现！"
+                room.broadcast("<dark_red>第 " + mixedWave + " 波：<bold>精英月人</bold>出现！"
                         + "</dark_red> <gray>（" + armorName(elite.armor()) + " + 药水强化，注意集火）");
             }
         }
-
         room.scoreboard().updateAll();
     }
 
-    /**
-     * 普通月人选区：按全部刷新区（normal + mixed）的编号顺序<b>轮转</b>取区。
-     * 与逐只随机挑区相比，多区时分布严格均等（如 2 区 × 每波 3 只 → 区1、区2、区1）。
-     */
-    private CuboidRegion nextNormalRegion() {
-        List<CuboidRegion> regions = room.arena().minionRegionList();
-        if (regions.isEmpty()) {
-            return null;
+    /** 按预算刷一批普通月人：上限对两条循环共用（场上普通月人总量不超标），取区由调用方给。 */
+    private void spawnRegularMinions(List<CuboidRegion> regions, java.util.function.Supplier<CuboidRegion> nextRegion) {
+        MatchRules rules = room.rules();
+        int budget = rules.minionMaxAlive() - aliveCount();
+        if (budget > 0) {
+            int count = Math.min(budget, Math.max(1, rules.minionPerSpawn()));
+            for (int i = 0; i < count; i++) {
+                CuboidRegion region = nextRegion.get();
+                if (region != null && region.world() != null) {
+                    spawnNormal(region, rules);
+                }
+            }
         }
-        return regions.get(Math.floorMod(normalRegionCursor++, regions.size()));
     }
 
-    /**
-     * 精英月人选区：只在 mixed 标签区之间轮转取区；
-     * 没有 mixed 区时返回 null（这一批精英不刷新，开局时已告警过一次）。
-     */
+    /** mixed 循环里的精英 / 普通月人选区：只在 mixed 标签区之间轮转取区。 */
     private CuboidRegion nextMixedRegion() {
         List<CuboidRegion> regions = room.arena().mixedMinionRegionList();
         if (regions.isEmpty()) {

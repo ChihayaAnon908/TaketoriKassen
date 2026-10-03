@@ -11,7 +11,11 @@ package com.taketori.kassen.core.match;
  * @param baseCaptureScore          拆除对方基地得分
  * @param minionHealth              小怪血量
  * @param minionIronArmor           小怪是否穿全套铁甲
- * @param minionIntervalSeconds     刷新间隔（秒）
+ * @param minionIntervalSeconds     刷新间隔（秒）——两类区域循环未单独配置时的回落值
+ * @param minionNormalEnabled       normal 标签刷新区的独立循环是否启用
+ * @param minionNormalIntervalSeconds normal 区循环间隔（秒），未配置回落 minionIntervalSeconds
+ * @param minionMixedEnabled        mixed 标签刷新区的独立循环是否启用（精英波也走这条循环）
+ * @param minionMixedIntervalSeconds  mixed 区循环间隔（秒），未配置回落 minionIntervalSeconds
  * @param minionPerSpawn            每次刷新几只
  * @param minionMaxAlive            场上小怪上限（达到上限就停止刷新）
  * @param baseCaptureSeconds        拆除基地需要连续占点多少秒
@@ -33,6 +37,10 @@ public record MatchRules(int scoreToWin,
                          int minionHealth,
                          boolean minionIronArmor,
                          int minionIntervalSeconds,
+                         boolean minionNormalEnabled,
+                         int minionNormalIntervalSeconds,
+                         boolean minionMixedEnabled,
+                         int minionMixedIntervalSeconds,
                          int minionPerSpawn,
                          int minionMaxAlive,
                          double baseCaptureSeconds,
@@ -53,7 +61,7 @@ public record MatchRules(int scoreToWin,
     public static MatchRules defaults() {
         return new MatchRules(600, 20 * 60, 5,
                 3, 10, 50,
-                40, true, 9, 3, 15,
+                40, true, 9, true, 9, true, 9, 3, 15,
                 10.0D, 60.0D, 0.5D, true, true,
                 6.0D, 0.0D, false, "auto");
     }

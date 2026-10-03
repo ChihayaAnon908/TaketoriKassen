@@ -1,20 +1,18 @@
 package com.taketori.kassen.paper.skill.impl;
 
 import com.taketori.kassen.TaketoriPlugin;
-import com.taketori.kassen.core.match.TeamId;
 import com.taketori.kassen.paper.skill.Skill;
 import com.taketori.kassen.paper.skill.SkillContext;
 import com.taketori.kassen.paper.skill.SkillResult;
+import com.taketori.kassen.paper.skill.SkillTargets;
 import com.taketori.kassen.version.VersionAdapter;
 import org.bukkit.Location;
-import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -75,34 +73,14 @@ public class MeleeSmashSkill implements Skill {
         }
         double range = context.dbl("range", 3.0D);
         double knockback = context.dbl("knockback", 0.35D);
-        double halfAngle = Math.toRadians(context.dbl("angle", 55.0D));
         int slowDuration = context.integer("slow-duration", 0);
         int freezeTicks = context.integer("freeze-ticks", 0);
 
         Location eye = player.getEyeLocation();
-        Vector direction = eye.getDirection().normalize();
 
-        List<LivingEntity> targets = new ArrayList<>();
-        for (Entity entity : player.getWorld().getNearbyEntities(eye, range, range, range)) {
-            if (!(entity instanceof LivingEntity living) || entity.equals(player) || living.isDead()) {
-                continue;
-            }
-            if (entity instanceof Player other) {
-                if (other.getGameMode().name().equals("SPECTATOR")
-                        || isProtectedTeammate(player, other)) {
-                    continue;
-                }
-            }
-            Vector toTarget = living.getLocation().add(0.0D, living.getHeight() * 0.5D, 0.0D)
-                    .toVector().subtract(eye.toVector());
-            if (toTarget.length() > range || toTarget.length() < 0.01D) {
-                continue;
-            }
-            if (direction.angle(toTarget) > halfAngle) {
-                continue;
-            }
-            targets.add(living);
-        }
+        // 目标筛选统一走 SkillTargets（受保护队友 / 召唤物 / 旁观者整个跳过），与其他技能同口径
+        List<LivingEntity> targets = SkillTargets.enemiesInCone(plugin, player, range,
+                context.dbl("angle", 55.0D));
 
         for (LivingEntity target : targets) {
             // 子类钩子：兑现类技能（echo_consume）在这里按目标身上的前置状态放大伤害
@@ -131,7 +109,8 @@ public class MeleeSmashSkill implements Skill {
             }
         }
 
-        Location impact = eye.clone().add(direction.clone().multiply(Math.min(range, 2.0D)));
+        Location impact = eye.clone().add(player.getEyeLocation().getDirection()
+                .normalize().multiply(Math.min(range, 2.0D)));
         plugin.fx().particle(context.str("particle", "SWEEP_ATTACK"), impact, targets.isEmpty() ? 1 : 3, 0.3D);
         if (!targets.isEmpty()) {
             plugin.fx().particle(context.str("hit-particle", "CRIT"), impact, 5, 0.3D);
@@ -151,23 +130,6 @@ public class MeleeSmashSkill implements Skill {
      */
     protected double bonusMultiplier(SkillContext context, LivingEntity target) {
         return 1.0D;
-    }
-
-    /**
-     * 对方是不是"受友伤保护的同队队友"：是则整个目标跳过——
-     * 伤害事件会被友伤处理器取消，但击退 / 减速 / 定身等控制效果不会，必须在此拦截。
-     */
-    protected boolean isProtectedTeammate(Player caster, Player other) {
-        var room = plugin.rooms().roomOf(caster);
-        if (room == null || !room.isFriendlyFireProtected()) {
-            return false;
-        }
-        if (plugin.rooms().roomOf(other) != room) {
-            return false;
-        }
-        TeamId casterTeam = room.teamOf(caster.getUniqueId());
-        TeamId otherTeam = room.teamOf(other.getUniqueId());
-        return casterTeam != null && casterTeam == otherTeam;
     }
 
     protected void applySlow(SkillContext context, LivingEntity target, int durationTicks) {

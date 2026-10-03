@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -102,6 +103,8 @@ public final class GameRoom {
 
     /** WAITING/STARTING 阶段的中立等待者（开局分队后清空，参与者转由 teams 记录）。 */
     private final Set<UUID> waiting = ConcurrentHashMap.newKeySet();
+    /** 本房对局中由插件施加过 Saturation 的玩家：收尾只清这里记过的，不动其他来源的效果。 */
+    private final Set<UUID> pluginSaturation = new HashSet<>();
 
     private final Map<TeamId, Integer> teamScores = new EnumMap<>(TeamId.class);
     private final Map<UUID, Integer> playerScores = new HashMap<>();
@@ -402,7 +405,9 @@ public final class GameRoom {
      */
     public void loadRules() {
         var cfg = plugin.getConfig();
-        // 月人刷新节奏：arenas.yml 的 minion-spawn（场地级）优先，未配置回落 config.yml 的 minion.* 全局默认
+        // 月人刷新节奏：arenas.yml 的 minion-spawn（场地级）优先，未配置回落 config.yml 的 minion.* 全局默认；
+        // normal / mixed 两类刷新区各有独立的启用开关与间隔，未单独配置时都回落 minion.interval-seconds（旧行为）
+        int baseInterval = Math.max(1, cfg.getInt("minion.interval-seconds", 9));
         rules = new MatchRules(
                 cfg.getInt("match.score-to-win", 600),
                 Math.max(1, cfg.getInt("match.time-limit-minutes", 20)) * 60,
@@ -412,7 +417,12 @@ public final class GameRoom {
                 cfg.getInt("scoring.base-capture", 50),
                 Math.max(1, cfg.getInt("minion.health", 40)),
                 cfg.getBoolean("minion.iron-armor", true),
-                arena.minionSpawnIntervalSeconds(Math.max(1, cfg.getInt("minion.interval-seconds", 9))),
+                arena.minionSpawnIntervalSeconds(baseInterval),
+                cfg.getBoolean("minion.normal.enabled", true),
+                arena.minionSpawnIntervalSeconds(
+                        Math.max(1, cfg.getInt("minion.normal.interval-seconds", baseInterval))),
+                cfg.getBoolean("minion.mixed.enabled", true),
+                Math.max(1, cfg.getInt("minion.mixed.interval-seconds", baseInterval)),
                 arena.minionSpawnPerSpawn(Math.max(1, cfg.getInt("minion.per-spawn", 3))),
                 arena.minionSpawnMaxAlive(Math.max(1, cfg.getInt("minion.max-alive", 15))),
                 Math.max(0.1D, cfg.getDouble("base.capture-seconds", 10.0D)),
@@ -1483,6 +1493,7 @@ public final class GameRoom {
             }
             case STARTING -> tickStarting();
             case CAGED -> {
+                refreshSaturation();
                 // 笼子阶段全员离线：不结算，直接还原收房
                 if (onlineParticipantCount() == 0) {
                     abortEmpty();
@@ -1493,6 +1504,7 @@ public final class GameRoom {
                     abortEmpty();
                     return;
                 }
+                refreshSaturation();
                 // 掉线缓冲（借鉴 BedWars2020 的 rejoin-time）：缺人宽限期内等补位，
                 // 超时仍无人补位 → 缺人队判负，不再让剩余玩家打着注定失衡的垃圾局
                 if (!isPve()) {
@@ -1980,6 +1992,47 @@ public final class GameRoom {
      * 还原笼子、停组件、清旁观、在线者回大厅、隐藏记分板，然后解除玩家→房间映射，
      * 清空名单/比分回到 WAITING，可立即匹配下一轮。
      */
+    /**
+     * 对局期间给参赛者续 Saturation（CAGED/PLAYING，由每秒的 {@link #tick()} 驱动，不新建调度任务）。
+     *
+     * <p>用 2 秒短时长覆盖式刷新：玩家离开对局后效果最迟 2 秒自然过期，不依赖清理逻辑；
+     * {@code combat.match-saturation} 可整体关闭。效果由插件施加的记录进 {@link #pluginSaturation}，
+     * 收尾时只清自己记过的。</p>
+     */
+    private void refreshSaturation() {
+        if (!plugin.config().matchSaturation()) {
+            return;
+        }
+        var saturation = plugin.versions().potionEffect("SATURATION");
+        if (saturation == null) {
+            return;
+        }
+        for (UUID uuid : teams.keySet()) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player == null || !player.isOnline()) {
+                continue;
+            }
+            // addPotionEffect 同类型同时长覆盖刷新，天然幂等；粒子/图标关闭避免刷屏
+            player.addPotionEffect(new PotionEffect(saturation, 40, 0, false, false, false));
+            pluginSaturation.add(uuid);
+        }
+    }
+
+    /** 收尾清除：只移除本房插件标记过的 Saturation，其他插件或玩家自带的效果不动。 */
+    private void clearPluginSaturation() {
+        if (pluginSaturation.isEmpty()) {
+            return;
+        }
+        var saturation = plugin.versions().potionEffect("SATURATION");
+        for (UUID uuid : pluginSaturation) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null && saturation != null) {
+                player.removePotionEffect(saturation);
+            }
+        }
+        pluginSaturation.clear();
+    }
+
     private void endCleanup() {
         if (endTask != null) {
             endTask.cancel();
@@ -1992,6 +2045,7 @@ public final class GameRoom {
         cage.restore();
         barrier.restore();
         stopComponents();
+        clearPluginSaturation();
 
         List<UUID> members = new ArrayList<>(teams.keySet());
         // 对局结束清掉参赛者的角色选择：取「整局成员缓存 ∪ 当前队伍」而不是只取 teams——
